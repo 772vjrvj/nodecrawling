@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>PandoGL</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden; /* ✅ 스크롤 방지 */
+            font-family: Arial, sans-serif;
+            background-color: #fff;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin: 20px;
+        }
+
+        .info-box {
+            border: 1px solid #ccc;
+            padding: 12px 16px;
+            margin: 10px 20px;
+            border-radius: 4px;
+            background-color: #fafafa;
+        }
+
+        button {
+            padding: 6px 16px;
+            border-radius: 4px;
+            border: none;
+            background-color: #4682B4;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .modal {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            visibility: hidden;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .modal.show {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            width: 300px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            box-sizing: border-box;
+        }
+
+        .form-group {
+            margin-bottom: 10px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            color: #444;
+            margin-bottom: 4px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+
+        .error-text {
+            color: red;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+<h1>PandoGL</h1>
+
+<div class="info-box">
+    <h3>매장 정보</h3>
+    <p id="store-info">● 매장명 : -<br>● 지점 : -</p>
+    <button onclick="showModal('store-modal')">등록</button>
+</div>
+
+<div class="info-box">
+    <h3>로그인 정보</h3>
+    <p id="login-info">● 아이디 : -<br>● 비밀번호 : -</p>
+    <button onclick="showModal('login-modal')">등록</button>
+</div>
+
+<div class="info-box" style="text-align: center;">
+    <button onclick="startAction()">시작</button>
+</div>
+
+<!-- ✅ 로그인 모달 -->
+<div id="login-modal" class="modal">
+    <div class="modal-content">
+        <h3>로그인 정보 등록</h3>
+
+        <div class="form-group">
+            <label for="login-id">아이디</label>
+            <input id="login-id" type="text" />
+            <div id="login-id-error" class="error-text"></div>
+        </div>
+
+        <div class="form-group">
+            <label for="login-password">비밀번호</label>
+            <input id="login-password" type="password" />
+            <div id="login-password-error" class="error-text"></div>
+        </div>
+
+        <div class="modal-footer">
+            <button onclick="closeModal('login-modal')">취소</button>
+            <button onclick="saveLoginInfo()">등록</button>
+        </div>
+    </div>
+</div>
+
+<!-- ✅ 매장 정보 모달 -->
+<div id="store-modal" class="modal">
+    <div class="modal-content">
+        <h3>매장 정보 등록</h3>
+        <div class="form-group">
+            <label for="store-id">매장 ID</label>
+            <input id="store-id" type="text" />
+            <div id="store-id-error" class="error-text"></div>
+        </div>
+        <div class="modal-footer">
+            <button onclick="closeModal('store-modal')">취소</button>
+            <button onclick="saveStoreInfo()">등록</button>
+        </div>
+    </div>
+</div>
+
+<script src="./src/renderer.js"></script>
+</body>
+</html>
