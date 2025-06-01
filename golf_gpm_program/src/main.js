@@ -33,12 +33,14 @@ app.whenReady().then(() => {
 });
 
 // 렌더러에서 'save-settings' 메시지를 보내면 설정을 저장
+// 렌더러 → 메인에 단순 메시지 전송
 ipcMain.on('save-settings', (event, { key, value }) => {
     console.log(`[NODE] 💾 [설정 저장 요청] key: "${key}", value: "${value}"`);
     store.set(key, value);
 });
 
 // 렌더러에서 'load-settings' 호출 시 키에 해당하는 값을 반환
+// 렌더러 → 메인에 요청 후 응답받기 (Promise 기반)
 ipcMain.handle('load-settings', (event, key) => {
     const value = store.get(key);
     console.log(`[NODE] 📥 [설정 불러오기 요청] key: "${key}" → value: "${value}"`);
