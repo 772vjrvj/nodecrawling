@@ -22,9 +22,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return result;
     },
 
+    fetchStoreInfo: async (storeId) => {
+        return await ipcRenderer.invoke('fetch-store-info', storeId);
+    },
+
     // 브라우저 로그를 메인 프로세스로 전송
     logToMain: (message) => {
-        console.log(`🪵 [렌더러 로그] ${message}`);
         ipcRenderer.send('log-from-renderer', message);
     }
 });

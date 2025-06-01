@@ -3,7 +3,6 @@ function showModal(id) {
     const modal = document.getElementById(id);
     if (!modal) return;
 
-    console.log(`📌 모달 열기: ${id}`);
     modal.classList.add('show');  // 모달 표시
     document.body.style.overflow = 'hidden';  // 배경 스크롤 방지
 
@@ -15,7 +14,6 @@ function showModal(id) {
 function closeModal(id) {
     const modal = document.getElementById(id);
     if (modal) {
-        console.log(`📴 모달 닫기: ${id}`);
         modal.classList.remove('show');  // 모달 숨김
         document.body.style.overflow = '';  // 스크롤 다시 허용
     }
@@ -108,21 +106,74 @@ async function saveStoreInfo() {
 }
 
 // 시작 버튼 클릭 시 실행 (향후 puppeteer 실행 IPC 요청 연결 가능)
-function startAction() {
+async function startAction() {
     console.log("▶ 시작 버튼 클릭됨");
+
+    const userId = document.getElementById("login-id").value.trim();
+    const password = document.getElementById("login-password").value.trim();
+    const storeId = document.getElementById("store-id").value.trim();
+
+    if (!userId || !password || !storeId) {
+        alert("아이디, 비밀번호, 매장 ID를 모두 입력하세요.");
+        console.log('userId :', userId)
+        console.log('password :', password)
+        console.log('storeId :', storeId)
+
+        return;
+    }
+
+    // ✅ 매장 정보 & 토큰 요청
+    const result = await window.electronAPI.fetchStoreInfo(storeId);
+    if (!result || !result.store) {
+        alert("매장 정보를 가져오지 못했습니다.");
+        return;
+    }
+
+    const { token, store } = result;
+    const name = store?.name || '-';
+    const branch = store?.branch || '-';
+
+    // ✅ index.html에 뿌리기
+    document.getElementById("store-info").innerHTML =
+        `● 매장명 : ${name}<br>● 지점 : ${branch}`;
+
+    console.log("🟢 매장 정보 불러오기 완료:", name, branch);
+
+    // ✅ puppeteer 실행
+    window.electronAPI.startCrawl({ userId, password, storeId });
 }
 
 // 페이지 로드 시 저장된 값 불러오기
 window.onload = async () => {
     console.log("🌐 페이지 로드: 설정값 초기화 시작");
+
     const storeId = await window.electronAPI.loadSettings("store/id") || "-";
     const userId = await window.electronAPI.loadSettings("login/id") || "-";
     const pw = await window.electronAPI.loadSettings("login/password") || "-";
 
+    // ✅ input에도 값 세팅
+    document.getElementById("store-id").value = storeId;
+    document.getElementById("login-id").value = userId;
+    document.getElementById("login-password").value = pw;
+
+
     console.log(`📌 로드된 설정: storeId=${storeId}, userId=${userId}, pw=${'*'.repeat(pw.length)}`);
 
+    // ✅ 매장 이름과 지점 이름 가져오기
+    let storeName = "-";
+    let branchName = "-";
+
+    if (storeId !== "-") {
+        const result = await window.electronAPI.fetchStoreInfo(storeId);
+        if (result && result.store) {
+            storeName = result.store.name || "-";
+            branchName = result.store.branch || "-";
+        }
+    }
+
+    // ✅ 화면에 출력
     document.getElementById("store-info").innerHTML =
-        `● 매장명 : ${storeId}<br>● 지점 : -`;
+        `● 매장명 : ${storeName}<br>● 지점 : ${branchName}`;
     document.getElementById("login-info").innerHTML =
         `● 아이디 : ${userId}<br>● 비밀번호 : ${'*'.repeat(pw.length)}`;
 };
