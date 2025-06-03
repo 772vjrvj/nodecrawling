@@ -13,7 +13,7 @@ npm install
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 # 프로젝트 폴더로 이동
-`cd D:\GIT\nodecrawling\golf_gpm_program`
+cd D:\GIT\nodecrawling\golf_gpm_program
 
 # 빌드 실행
 npm run build
