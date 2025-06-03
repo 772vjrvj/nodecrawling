@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { app } = require('electron'); // remote 제거, 안전한 방식
 
 function getTimestamp() {
     const now = new Date();
@@ -8,8 +9,16 @@ function getTimestamp() {
 
 function getLogFilePath() {
     const now = new Date().toISOString().substring(0, 10);
-    const dir = path.join(__dirname, '../../logs');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); // 하위 경로까지 생성
+
+    // 사용자 데이터 경로 지정 (예: C:\Users\USER\AppData\Roaming\GPMReservation\logs)
+    const userDataPath = app.getPath('userData');
+    const dir = path.join(userDataPath, 'logs');
+
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log('📁 로그 디렉토리 생성됨:', dir);
+    }
+
     return path.join(dir, `${now}.log`);
 }
 
@@ -27,8 +36,8 @@ function getCallerInfo() {
 
     const fullPath = match[1];
     const fileParts = fullPath.split(path.sep);
-    const filenameWithLine = fileParts[fileParts.length - 1]; // "main.js:12:5"
-    return filenameWithLine.split(':').slice(0, 2).join(':'); // "main.js:12"
+    const filenameWithLine = fileParts[fileParts.length - 1];
+    return filenameWithLine.split(':').slice(0, 2).join(':');
 }
 
 function baseLogger(scope, ...messages) {
@@ -40,7 +49,6 @@ function baseLogger(scope, ...messages) {
     fs.appendFileSync(getLogFilePath(), formatted + '\n');
 }
 
-// ✅ 전역 등록 (다중 인자 지원 통일)
 global.nodeLog = (...args) => baseLogger('Node', ...args);
 global.browserLog = (...args) => baseLogger('Browser', ...args);
 global.nodeError = (...args) => baseLogger('Node', '❌ ERROR:', ...args);

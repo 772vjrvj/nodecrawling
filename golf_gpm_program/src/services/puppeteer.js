@@ -11,6 +11,7 @@ async function initBrowser() {
     if (!browser) {
         browser = await puppeteer.launch({
             headless: false,
+            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',  // ✅ 여기에 추가
             defaultViewport: null,
             args: [
                 '--window-size=1200,1000',
@@ -25,6 +26,7 @@ async function initBrowser() {
     }
     return { browser, page };
 }
+
 
 /**
  * GPM 로그인 후 예약 탭을 열고 해당 Puppeteer Page 객체를 반환

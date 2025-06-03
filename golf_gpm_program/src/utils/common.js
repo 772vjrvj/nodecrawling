@@ -24,14 +24,16 @@ function toIsoKstFormat(kstStr) {
  * @param {object} obj
  * @returns {object}
  */
-function compact(obj) {
+function compact(obj, alwaysInclude = []) {
     return Object.fromEntries(
-        Object.entries(obj).filter(
-            ([_, v]) =>
+        Object.entries(obj).filter(([k, v]) =>
+            alwaysInclude.includes(k) ||
+            (
                 v !== null &&
-                v !== undefined &&               // ✅ undefined 추가
+                v !== undefined &&
                 v !== '' &&
                 !(Array.isArray(v) && v.length === 0)
+            )
         )
     );
 }

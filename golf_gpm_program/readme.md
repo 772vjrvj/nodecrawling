@@ -1,6 +1,24 @@
 npm init -y
 npm start
 npm install electron-store
+npm run build
+
+
+Remove-Item -Recurse -Force .\node_modules
+Remove-Item .\package-lock.json
+npm install
+
+
+# PowerShell 관리자 권한으로 실행한 후
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# 프로젝트 폴더로 이동
+`cd D:\GIT\nodecrawling\golf_gpm_program`
+
+# 빌드 실행
+npm run build
+
+
 
 
 ■ 매장정보
@@ -16,3 +34,39 @@ npm install electron-store
 
 ■ 한글 깨질시
     CMD : chcp 65001
+
+
+설치경로
+C:\Program Files\GPMReservation
+
+로그 경로
+C:\Users\<사용자>\AppData\Roaming\golf-gpm-program\logs
+
+start-with-log.bat 바탕화면에 두기
+
+설치 후 
+바탕화면에 GPMReservation 생기면
+바탕화면에 start-with-log.bat 두고 실해
+
+
+
+
+
+2025-06-03 수정사항
+
+■ 버전 정보를 실행파일의 속성 창에서 확인 가능하도록 
+-> 수정완료
+
+■ 다영: 전화번호가 없는 경우 phone의 값을 "" 빈 string으로 넘겨주세요.
+notion API 명세서에 업데이트 해 놓았습니다.
+참고 부탁 드립니다.
+-> 수정완료(신규, 예약시 phone 없는 경우 공백값)
+
+■ 재현 경로는 알수 없으나 갑자기 로그가 엄청올라옴 
+-> 일렉트론으로 바꾸며 수정완료
+
+■ 점주 카카오톡 내용 확인시 모바일 고객 예약취소로 반영됨
+-> 실제로 취소 사유가 넘어오지 않아 하드코딩하기로 일전에 팀장님과 이야기 함
+
+■ 점주,고객에게 예약 취소 메시지 발송함
+-> 내용 이해 못함

@@ -50,7 +50,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                         roomId: String(entity.machineNumber),
                         crawlingSite: CRAWLING_SITE,
                         name: String(request.bookingName),
-                        phone: request.cellNumber,
+                        phone: String(request.cellNumber || ''),
                         requests: request.bookingMemo,
                         paymented: request.paymentYn === 'Y',
                         partySize: parseInt(request.bookingCnt || 1),
@@ -58,7 +58,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                         startDate: toIsoKstFormat(request.bookingStartDt),
                         endDate: toIsoKstFormat(request.bookingEndDt),
                         externalGroupId: request.reserveNo ? String(request.reserveNo) : undefined,
-                    });
+                    }, ['phone']);
                     nodeLog("📦 register payload:", JSON.stringify(payload, null, 2));
                     await patch(token, storeId, payload, null);
                 }
@@ -69,15 +69,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                 const reserveNo = request?.reserveNo;
                 const bookingNumber = request?.bookingNumber;
 
-                if (reserveNo) {
-                    const payload = {
-                        crawlingSite: CRAWLING_SITE,
-                        reason: '고객 취소',
-                        externalGroupId: String(reserveNo),
-                    };
-                    nodeLog("📦 delete 고객 payload:", JSON.stringify(payload, null, 2));
-                    await del(token, storeId, payload, 'g');
-                } else if (bookingNumber) {
+                if (bookingNumber) {
                     const payload = {
                         crawlingSite: CRAWLING_SITE,
                         reason: '추가 수정시 기존 취소',
@@ -85,6 +77,15 @@ async function dispatchAction(action, combinedData, token, storeId) {
                     };
                     nodeLog("📦 delete 운영자 payload:", JSON.stringify(payload, null, 2));
                     await del(token, storeId, payload, null);
+
+                } else if (reserveNo) {
+                    const payload = {
+                        crawlingSite: CRAWLING_SITE,
+                        reason: '고객 취소',
+                        externalGroupId: String(reserveNo),
+                    };
+                    nodeLog("📦 delete 고객 payload:", JSON.stringify(payload, null, 2));
+                    await del(token, storeId, payload, 'g');
                 }
 
                 const entities = response?.entitys || [];
@@ -95,7 +96,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                             roomId: String(entity.machineNumber),
                             crawlingSite: CRAWLING_SITE,
                             name: String(request.bookingName),
-                            phone: request.cellNumber,
+                            phone: String(request.cellNumber || ''),
                             requests: request.bookingMemo,
                             paymented: request.paymentYn === 'Y',
                             partySize: parseInt(request.bookingCnt || 1),
@@ -103,7 +104,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                             startDate: toIsoKstFormat(request.bookingStartDt),
                             endDate: toIsoKstFormat(request.bookingEndDt),
                             externalGroupId: reserveNo ? String(reserveNo) : undefined,
-                        });
+                        }, ['phone']);
                         nodeLog("📦 edit payload:", JSON.stringify(payload, null, 2));
                         await patch(token, storeId, payload, null);
                     }
@@ -113,7 +114,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                         roomId: String(request.machineNumber),
                         crawlingSite: CRAWLING_SITE,
                         name: String(request.bookingName),
-                        phone: request.cellNumber,
+                        phone: String(request.cellNumber || ''),
                         requests: request.bookingMemo,
                         paymented: request.paymentYn === 'Y',
                         partySize: parseInt(request.bookingCnt || 1),
@@ -121,7 +122,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                         startDate: toIsoKstFormat(request.bookingStartDt),
                         endDate: toIsoKstFormat(request.bookingEndDt),
                         externalGroupId: reserveNo ? String(reserveNo) : undefined,
-                    });
+                    }, ['phone']);
                     nodeLog("📦 edit payload:", JSON.stringify(payload, null, 2));
                     await patch(token, storeId, payload, null);
                 }
