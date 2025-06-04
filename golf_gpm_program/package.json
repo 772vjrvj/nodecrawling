@@ -1,10 +1,10 @@
 {
   "name": "golf-gpm-program",
   "version": "1.0.0",
-  "description": "GPM 예약 자동화",
-  "author": "고 승현",
+  "description": "GPM 예약 자동화 프로그램",
+  "author": "판도",
+  "productName": "GPMReservation",
   "main": "src/main.js",
-  "type": "commonjs",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
@@ -12,8 +12,7 @@
   "build": {
     "appId": "com.gpm.reservation",
     "productName": "GPMReservation",
-    "copyright": "Copyright © 2025 고 승현",
-    "publisherName": "고 승현",
+    "copyright": "Copyright © 2025 판도",
     "files": [
       "index.html",
       "src/**/*",
@@ -25,7 +24,9 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "assets/icons/icon.ico"
+      "icon": "assets/icons/icon.ico",
+      "publisherName": "판도",
+      "legalTrademarks": "© 2025 판도"
     },
     "nsis": {
       "oneClick": false,
@@ -34,9 +35,6 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "GPMReservation"
-    },
-    "mac": {
-      "publish": null
     }
   },
   "devDependencies": {

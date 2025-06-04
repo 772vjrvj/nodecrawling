@@ -32,11 +32,15 @@ function compact(obj, alwaysInclude = []) {
                 v !== null &&
                 v !== undefined &&
                 v !== '' &&
-                !(Array.isArray(v) && v.length === 0)
+                !(Array.isArray(v) && v.length === 0) &&
+                !(k === 'paymentAmount' && v === 0) // ⬅️ 0이면 제거
             )
         )
     );
 }
+
+
+
 module.exports = {
     toIsoKstFormat,
     compact

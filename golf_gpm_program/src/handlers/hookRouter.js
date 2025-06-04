@@ -69,16 +69,17 @@ async function dispatchAction(action, combinedData, token, storeId) {
                 const reserveNo = request?.reserveNo;
                 const bookingNumber = request?.bookingNumber;
 
-                if (bookingNumber) {
-                    const payload = {
-                        crawlingSite: CRAWLING_SITE,
-                        reason: '추가 수정시 기존 취소',
-                        externalId: String(bookingNumber),
-                    };
-                    nodeLog("📦 delete 운영자 payload:", JSON.stringify(payload, null, 2));
-                    await del(token, storeId, payload, null);
-
-                } else if (reserveNo) {
+                // if (bookingNumber) {
+                //     const payload = {
+                //         crawlingSite: CRAWLING_SITE,
+                //         reason: '추가 수정시 기존 취소',
+                //         externalId: String(bookingNumber),
+                //     };
+                //     nodeLog("📦 delete 운영자 payload:", JSON.stringify(payload, null, 2));
+                //     await del(token, storeId, payload, null);
+                //
+                // } else
+                if (reserveNo) {
                     const payload = {
                         crawlingSite: CRAWLING_SITE,
                         reason: '고객 취소',
