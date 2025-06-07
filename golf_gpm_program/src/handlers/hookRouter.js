@@ -81,23 +81,16 @@ async function dispatchAction(action, combinedData, token, storeId) {
                     nodeLog("📦 delete 고객 payload:", JSON.stringify(payload, null, 2));
                     await del(token, storeId, payload, 'g');
                 }
-                else
+                // 웹에서 예약수가 2이상 이면 무조건 새로운 예약번호를 채번하기 때문에 기존에 예약은 무조건 지워야 한다.
+                else if (entities.length > 0)
                 {
-                    // bookingNumber가 entities 내 어떤 entity.bookingNumber[0]에도 없을 때만 삭제
-                    const existsInEntities = entities.some(entity =>
-                        Array.isArray(entity.bookingNumber) &&
-                        entity.bookingNumber.includes(bookingNumber)
-                    );
-
-                    if (bookingNumber && entities.length > 0 && !existsInEntities) {
-                        const payload = {
-                            crawlingSite: CRAWLING_SITE,
-                            reason: '수정 취소',
-                            externalId: String(bookingNumber),
-                        };
-                        nodeLog("📦 delete 운영자 payload:", JSON.stringify(payload, null, 2));
-                        await del(token, storeId, payload, null);
-                    }
+                    const payload = {
+                        crawlingSite: CRAWLING_SITE,
+                        reason: '수정 취소',
+                        externalId: String(bookingNumber),
+                    };
+                    nodeLog("📦 delete 운영자 payload:", JSON.stringify(payload, null, 2));
+                    await del(token, storeId, payload, null);
                 }
 
                 if (entities.length > 0) {
