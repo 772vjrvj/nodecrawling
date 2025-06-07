@@ -68,28 +68,38 @@ async function dispatchAction(action, combinedData, token, storeId) {
             case 'edit': {
                 const reserveNo = request?.reserveNo;
                 const bookingNumber = request?.bookingNumber;
+                const machineNumber = request?.machineNumber || [];
+                const entities = response?.entitys || [];
 
-                // if (bookingNumber) {
-                //     const payload = {
-                //         crawlingSite: CRAWLING_SITE,
-                //         reason: '추가 수정시 기존 취소',
-                //         externalId: String(bookingNumber),
-                //     };
-                //     nodeLog("📦 delete 운영자 payload:", JSON.stringify(payload, null, 2));
-                //     await del(token, storeId, payload, null);
-                //
-                // } else
-                if (reserveNo) {
+                // 모바일에서 2개 이상으로 수정하는 경우는 기존에 모든 예약이 사라진다.
+                if (reserveNo && Array.isArray(machineNumber) && machineNumber.length > 0) {
                     const payload = {
                         crawlingSite: CRAWLING_SITE,
-                        reason: '고객 취소',
+                        reason: '모바일 예약 변경 취소',
                         externalGroupId: String(reserveNo),
                     };
                     nodeLog("📦 delete 고객 payload:", JSON.stringify(payload, null, 2));
                     await del(token, storeId, payload, 'g');
                 }
+                else
+                {
+                    // bookingNumber가 entities 내 어떤 entity.bookingNumber[0]에도 없을 때만 삭제
+                    const existsInEntities = entities.some(entity =>
+                        Array.isArray(entity.bookingNumber) &&
+                        entity.bookingNumber.includes(bookingNumber)
+                    );
 
-                const entities = response?.entitys || [];
+                    if (bookingNumber && entities.length > 0 && !existsInEntities) {
+                        const payload = {
+                            crawlingSite: CRAWLING_SITE,
+                            reason: '수정 취소',
+                            externalId: String(bookingNumber),
+                        };
+                        nodeLog("📦 delete 운영자 payload:", JSON.stringify(payload, null, 2));
+                        await del(token, storeId, payload, null);
+                    }
+                }
+
                 if (entities.length > 0) {
                     for (const entity of entities) {
                         const payload = compact({
