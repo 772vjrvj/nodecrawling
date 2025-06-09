@@ -55,7 +55,7 @@ function baseLogger(scope, ...messages) {
     fs.appendFileSync(getLogFilePath(), formatted + '\n');
 }
 
-// ✅ 글로벌 로그 함수 등록
+// ✅ 글로벌 로그 함수 등록a
 global.nodeLog = (...args) => baseLogger('Node', ...args);
 global.browserLog = (...args) => baseLogger('Browser', ...args);
 global.nodeError = (...args) => baseLogger('Node', '❌ ERROR:', ...args);

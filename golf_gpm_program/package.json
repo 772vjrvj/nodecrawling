@@ -1,9 +1,9 @@
 {
   "name": "golf-gpm-program",
-  "version": "1.0.0",
-  "description": "GPM 예약 자동화 프로그램",
-  "author": "판도",
-  "productName": "GPMReservation",
+  "version": "0.9.0",
+  "description": "PandoP 데이터 수집 프로그램",
+  "author": "PandoP",
+  "productName": "PandoP",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -11,8 +11,9 @@
   },
   "build": {
     "appId": "com.gpm.reservation",
-    "productName": "GPMReservation",
-    "copyright": "Copyright © 2025 판도",
+    "productName": "PandoP",
+    "copyright": "Copyright © 2025 PandoP",
+    "buildVersion": "0.9.0.0",
     "files": [
       "index.html",
       "src/**/*",
@@ -25,8 +26,8 @@
     "win": {
       "target": "nsis",
       "icon": "assets/icons/icon.ico",
-      "publisherName": "판도",
-      "legalTrademarks": "© 2025 판도"
+      "publisherName": "PandoP",
+      "legalTrademarks": "© 2025 PandoP"
     },
     "nsis": {
       "oneClick": false,
@@ -34,7 +35,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "GPMReservation"
+      "shortcutName": "PandoP"
     }
   },
   "devDependencies": {

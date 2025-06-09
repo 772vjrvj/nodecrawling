@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title GPMReservation 실행기
+title PandoP 실행기
 
-cd /d "C:\Program Files\GPMReservation"
-echo ▶ GPMReservation 실행 중...
-GPMReservation.exe
+cd /d "C:\Program Files\PandoP"
+echo ▶ PandoP 실행 중...
+PandoP.exe
 
 pause

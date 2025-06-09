@@ -9,11 +9,14 @@ Remove-Item .\package-lock.json
 npm install
 
 
+# 버전정보
+npm 11.4.1, node v22.16.0
+
 # PowerShell 관리자 권한으로 실행한 후
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 # 프로젝트 폴더로 이동
-cd D:\GIT\nodecrawling\golf_gpm_program
+cd E:\git\nodecrawling\golf_gpm_program
 
 # 빌드 실행
 npm run build
@@ -37,10 +40,14 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 
 
 설치경로
-C:\Program Files\GPMReservation
+C:\Program Files\PandoP
 
 로그 경로
 C:\Users\<사용자>\AppData\Roaming\golf-gpm-program\logs
+C:\Users\<사용자>\AppData\Roaming\GPMReservation\logs
+
+C:\Users\772vj\AppData\Roaming\PandoP\logs
+C:\Users\<사용자>\AppData\Roaming\PandoP\logs
 
 start-with-log.bat 바탕화면에 두기
 

@@ -1,7 +1,8 @@
 // src/utils/api.js
 const axios = require('axios');
 
-const BASE_URL = 'https://api.dev.24golf.co.kr';
+//const BASE_URL_DEV = 'https://api.dev.24golf.co.kr';
+const BASE_URL = 'https://api.24golf.co.kr';
 
 /**
  * ✅ 파라미터 타입에 따라 URL 조립
