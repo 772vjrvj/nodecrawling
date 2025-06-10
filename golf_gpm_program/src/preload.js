@@ -1,3 +1,4 @@
+//preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 
 // contextBridge로 electronAPI라는 전역 객체를 노출
@@ -29,5 +30,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 브라우저 로그를 메인 프로세스로 전송
     logToMain: (message) => {
         ipcRenderer.send('log-from-renderer', message);
-    }
+    },
+
+    // ✅ 추가된 부분
+    getChromePath: async () => {
+        const result = await ipcRenderer.invoke('get-chrome-path');
+        console.log(`🔍 getChromePath 결과: ${result}`);
+        return result;
+    },
+
+    openChromePathDialog: () => ipcRenderer.invoke('open-chrome-path-dialog'),
+
+    onCrawlError: (callback) => {
+        ipcRenderer.on('crawl-error', (_, message) => {
+            callback(message);
+        });
+    },
+
 });
+

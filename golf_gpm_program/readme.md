@@ -33,7 +33,7 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 
 ■ 비밀번호 저장 경로
     C:\Users\<사용자>\AppData\Roaming\<앱이름>\config.json
-
+    C:\Users\772vj\AppData\Roaming\PandoP\config.json
 
 ■ 한글 깨질시
     CMD : chcp 65001

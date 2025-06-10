@@ -1,3 +1,56 @@
+//renderer.js
+// 페이지 로드 시 저장된 값 불러오기
+window.onload = async () => {
+    console.log("🌐 페이지 로드: 설정값 초기화 시작");
+
+    const storeId = await window.electronAPI.loadSettings("store/id") || "-";
+    const userId = await window.electronAPI.loadSettings("login/id") || "-";
+    const pw = await window.electronAPI.loadSettings("login/password") || "-";
+
+    // ✅ 크롬 경로: 먼저 자동 탐지 → 없으면 저장된 값 사용
+    let chromePath = await window.electronAPI.getChromePath();
+    if (!chromePath) {
+        chromePath = await window.electronAPI.loadSettings("chrome/path") || "-";
+        console.log(`📦 저장된 크롬 경로 사용: ${chromePath}`);
+    } else {
+        console.log(`🔍 자동 탐지된 크롬 경로 사용: ${chromePath}`);
+    }
+
+    // ✅ input에도 값 세팅
+    document.getElementById("store-id").value = storeId;
+    document.getElementById("login-id").value = userId;
+    document.getElementById("login-password").value = pw;
+    document.getElementById("chrome-path").value = chromePath;
+
+    console.log(`📌 로드된 설정: storeId=${storeId}, userId=${userId}, pw=${'*'.repeat(pw.length)}`);
+
+    // ✅ 매장 이름과 지점 이름 가져오기
+    let storeName = "-";
+    let branchName = "-";
+
+    if (storeId !== "-") {
+        const result = await window.electronAPI.fetchStoreInfo(storeId);
+        if (result && result.store) {
+            storeName = result.store.name || "-";
+            branchName = result.store.branch || "-";
+        }
+    }
+
+    // ✅ 화면에 출력
+    document.getElementById("store-info").innerHTML =
+        `● 매장명 : ${storeName}<br>● 지점 : ${branchName}`;
+    document.getElementById("login-info").innerHTML =
+        `● 아이디 : ${userId}<br>● 비밀번호 : ${'*'.repeat(pw.length)}`;
+    document.getElementById("chrome-info").innerHTML =
+        `● 경로 : ${chromePath}`;
+};
+
+
+window.electronAPI.onCrawlError((message) => {
+    alert(`🚨 크롤링 중 오류 발생:\n${message}`);
+});
+
+
 // 모달 열기
 function showModal(id) {
     const modal = document.getElementById(id);
@@ -8,6 +61,8 @@ function showModal(id) {
 
     if (id === 'store-modal') initStoreModal();
     if (id === 'login-modal') initLoginModal();
+    if (id === 'chrome-modal') initChromeModal();
+
 }
 
 // 모달 닫기
@@ -112,12 +167,14 @@ async function startAction() {
     const userId = document.getElementById("login-id").value.trim();
     const password = document.getElementById("login-password").value.trim();
     const storeId = document.getElementById("store-id").value.trim();
+    const chromePath = document.getElementById("chrome-path").value.trim();
 
-    if (!userId || !password || !storeId) {
+    if (!userId || !password || !storeId || !chromePath) {
         alert("아이디, 비밀번호, 매장 ID를 모두 입력하세요.");
         console.log('userId :', userId)
         console.log('password :', password)
         console.log('storeId :', storeId)
+        console.log('chromePath :', chromePath)
 
         return;
     }
@@ -140,40 +197,55 @@ async function startAction() {
     console.log("🟢 매장 정보 불러오기 완료:", name, branch);
 
     // ✅ puppeteer 실행
-    window.electronAPI.startCrawl({ userId, password, storeId });
+    window.electronAPI.startCrawl({ userId, password, storeId, chromePath });
 }
 
-// 페이지 로드 시 저장된 값 불러오기
-window.onload = async () => {
-    console.log("🌐 페이지 로드: 설정값 초기화 시작");
-
-    const storeId = await window.electronAPI.loadSettings("store/id") || "-";
-    const userId = await window.electronAPI.loadSettings("login/id") || "-";
-    const pw = await window.electronAPI.loadSettings("login/password") || "-";
-
-    // ✅ input에도 값 세팅
-    document.getElementById("store-id").value = storeId;
-    document.getElementById("login-id").value = userId;
-    document.getElementById("login-password").value = pw;
 
 
-    console.log(`📌 로드된 설정: storeId=${storeId}, userId=${userId}, pw=${'*'.repeat(pw.length)}`);
+// 크롬 모달 초기화
+function initChromeModal() {
+    console.log("🔄 크롬 경로 모달 초기화 시작");
 
-    // ✅ 매장 이름과 지점 이름 가져오기
-    let storeName = "-";
-    let branchName = "-";
-
-    if (storeId !== "-") {
-        const result = await window.electronAPI.fetchStoreInfo(storeId);
-        if (result && result.store) {
-            storeName = result.store.name || "-";
-            branchName = result.store.branch || "-";
+    // 1. 실제 설치된 크롬 경로 우선 확인
+    window.electronAPI.getChromePath().then(autoPath => {
+        if (autoPath) {
+            console.log(`✅ 자동 탐지된 크롬 경로 사용: ${autoPath}`);
+            document.getElementById('chrome-path').value = autoPath;
+        } else {
+            // 2. 자동 경로 실패 시, 저장된 값 사용
+            window.electronAPI.loadSettings('chrome/path').then(savedPath => {
+                console.log(`📦 저장된 경로 사용: ${savedPath}`);
+                document.getElementById('chrome-path').value = savedPath || '';
+            });
         }
+
+        document.getElementById('chrome-path-error').innerText = '';
+    });
+}
+
+
+// 경로 저장
+async function saveChromePath() {
+    const chromePath = document.getElementById("chrome-path").value.trim();
+    const errorBox = document.getElementById("chrome-path-error");
+
+    errorBox.innerText = "";
+
+    if (!chromePath) {
+        errorBox.innerText = "필수값 입니다.";
+        return;
     }
 
-    // ✅ 화면에 출력
-    document.getElementById("store-info").innerHTML =
-        `● 매장명 : ${storeName}<br>● 지점 : ${branchName}`;
-    document.getElementById("login-info").innerHTML =
-        `● 아이디 : ${userId}<br>● 비밀번호 : ${'*'.repeat(pw.length)}`;
-};
+    await window.electronAPI.saveSettings('chrome/path', chromePath);
+    document.getElementById("chrome-info").innerHTML = `● 경로 : ${chromePath}`;
+    closeModal('chrome-modal');
+}
+
+
+// 찾아보기 버튼 클릭 시
+async function browseChromePath() {
+    const selected = await window.electronAPI.openChromePathDialog();
+    if (selected) {
+        document.getElementById("chrome-path").value = selected;
+    }
+}

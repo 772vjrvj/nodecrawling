@@ -7,11 +7,11 @@ const { attachRequestHooks } = require('../handlers/router');
 let browser = null;
 let page = null;
 
-async function initBrowser() {
+async function initBrowser(chromePath) {
     if (!browser) {
         browser = await puppeteer.launch({
             headless: false,
-            executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            executablePath: chromePath,
             defaultViewport: null,
             args: [
                 '--window-size=1200,1000',
@@ -36,8 +36,8 @@ async function initBrowser() {
  * @param {string} param0.token
  * @returns {Promise<Page>} 예약 페이지 탭 (newPage)
  */
-async function login({ userId, password, token }) {
-    const { page } = await initBrowser();
+async function login({ userId, password, token, chromePath }) {
+    const { page } = await initBrowser(chromePath);
 
     await page.goto("https://gpm.golfzonpark.com", { waitUntil: 'networkidle2', timeout: 60000 });
 
