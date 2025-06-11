@@ -30,6 +30,18 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
     경영주id : bancj1
     비번 : qwer1234
 
+    운영 매장 아이디
+    ● 매장 아이디 : 6768ee8213b5aa99057cdec1
+    ● 매장명 : 시흥 대야소래산점 3층
+    ● 지점 : 골프존파크_투비전NX
+
+
+    운영 매장 아이디
+    ● 매장 아이디 : 66bc390a667cb9fc7e12481f
+    ● 매장명 : 평택 용이 쪽스크린
+    ● 지점 : 골프존파크_투비전NX
+
+
 
 ■ 비밀번호 저장 경로
     C:\Users\<사용자>\AppData\Roaming\<앱이름>\config.json

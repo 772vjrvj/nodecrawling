@@ -47,7 +47,7 @@ window.onload = async () => {
 
 
 window.electronAPI.onCrawlError((message) => {
-    alert(`🚨 크롤링 중 오류 발생:\n${message}`);
+    alert(`🚨 작업중 중 오류 발생:\n${message}`);
 });
 
 
