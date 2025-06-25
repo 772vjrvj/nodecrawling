@@ -1,4 +1,4 @@
-//preload.js
+//src/preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 
 // contextBridge로 electronAPI라는 전역 객체를 노출

@@ -1,4 +1,4 @@
-//puppeteer.js
+// src/services/puppeteer.js
 
 const puppeteer = require('puppeteer');
 const { attachRequestHooks } = require('../handlers/router');
@@ -7,7 +7,6 @@ let browser = null;
 let page = null;
 
 async function initBrowser(chromePath) {
-    // ✅ 1. 이전 브라우저 인스턴스가 살아있으면 종료
     if (browser && browser.isConnected()) {
         nodeLog('🔁 기존 브라우저 인스턴스 종료');
         await browser.close();
@@ -15,7 +14,6 @@ async function initBrowser(chromePath) {
         page = null;
     }
 
-    // ✅ 2. 새 브라우저 시작
     browser = await puppeteer.launch({
         headless: false,
         executablePath: chromePath,
@@ -28,7 +26,6 @@ async function initBrowser(chromePath) {
         ]
     });
 
-    // ✅ 3. 브라우저 종료 감지 시 참조 해제
     browser.on('disconnected', () => {
         nodeLog('🛑 브라우저 종료 감지: 내부 객체 초기화');
         browser = null;
@@ -41,14 +38,6 @@ async function initBrowser(chromePath) {
     return { browser, page };
 }
 
-/**
- * GPM 로그인 후 예약 탭을 열고 해당 Puppeteer Page 객체를 반환
- * @param {Object} param0
- * @param {string} param0.userId
- * @param {string} param0.password
- * @param {string} param0.token
- * @returns {Promise<Page>} 예약 페이지 탭 (newPage)
- */
 async function login({ userId, password, token, chromePath }) {
     try {
         const { page, browser } = await initBrowser(chromePath);
@@ -73,6 +62,8 @@ async function login({ userId, password, token, chromePath }) {
             page.waitForNavigation({ waitUntil: 'networkidle0' }),
         ]);
 
+        let hookConnected = false;
+
         const newPagePromise = new Promise(resolve => {
             page.browser().once('targetcreated', async target => {
                 const newPage = await target.page();
@@ -81,6 +72,7 @@ async function login({ userId, password, token, chromePath }) {
                 }
 
                 attachRequestHooks(newPage);
+                hookConnected = true;
                 nodeLog("🔌 Request hook connected (in login)");
                 resolve(newPage);
             });
@@ -89,7 +81,7 @@ async function login({ userId, password, token, chromePath }) {
         await page.waitForSelector('button.booking__btn', { timeout: 10000 });
         await page.click('button.booking__btn');
 
-        const newPage = await newPagePromise;
+        let newPage = await newPagePromise;
 
         await newPage.bringToFront();
 
@@ -98,6 +90,19 @@ async function login({ userId, password, token, chromePath }) {
             .catch(() => nodeLog("⚠️ 예약 페이지 UI 로딩 실패: .dhx_cal_container.dhx_scheduler_list"));
 
         nodeLog("🟢 예약 페이지 접근됨:", newPage.url());
+
+        // ✅ fallback 후킹 로직 (혹시 attachRequestHooks 실패했을 경우)
+        setTimeout(async () => {
+            if (!hookConnected) {
+                const pages = await browser.pages();
+                const fallbackPage = pages.find(p => p.url().includes('reservation') && !p.isClosed());
+                if (fallbackPage) {
+                    attachRequestHooks(fallbackPage);
+                    nodeLog("🔁 fallback hook connected (reservation page)");
+                }
+            }
+        }, 5000);
+
         return newPage;
 
     } catch (err) {

@@ -1,3 +1,4 @@
+//src/handlers/router.js
 const querystring = require('querystring');
 const { saveRequest, matchAndDispatch } = require('../handlers/hookRouter');
 
@@ -42,6 +43,9 @@ function attachRequestHooks(page) {
                     parsedData = JSON.parse(postData);
                 } else if (contentType.includes('application/x-www-form-urlencoded')) {
                     parsedData = querystring.parse(postData);
+                } else if (contentType.includes('text/plain')) {
+                    // 간단한 key=value 문자열을 querystring으로 파싱
+                    parsedData = querystring.parse(postData);
                 } else {
                     throw new Error(`Unknown content type: ${contentType}`);
                 }
@@ -80,7 +84,16 @@ function attachRequestHooks(page) {
             const contentType = res.headers()['content-type'] || '';
             if (!contentType.includes('application/json')) return;
 
-            const responseJson = await res.json();
+            let responseJson;
+            try {
+                responseJson = await res.json();  // ⛳ 여기를 감쌈
+            } catch (e) {
+                if (e.message.includes("Could not load body")) {
+                    nodeLog(`⚠️ 응답 본문 없음 (무시됨): ${url}`);
+                    return;  // 본문이 없으면 응답 분석 생략
+                }
+                throw e; // 다른 에러는 원래대로 처리
+            }
 
             for (const action in TARGETS.response) {
                 if (TARGETS.response[action].test(url)) {

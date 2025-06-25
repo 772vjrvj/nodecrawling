@@ -1,3 +1,4 @@
+//src/store.js
 let store;
 
 (async () => {

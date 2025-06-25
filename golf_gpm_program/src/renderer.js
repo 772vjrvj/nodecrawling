@@ -1,4 +1,4 @@
-//renderer.js
+//src/renderer.js
 // 페이지 로드 시 저장된 값 불러오기
 window.onload = async () => {
     console.log("🌐 페이지 로드: 설정값 초기화 시작");
