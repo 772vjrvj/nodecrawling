@@ -1,6 +1,6 @@
 {
   "name": "golf-gpm-program",
-  "version": "0.9.0",
+  "version": "0.9.4",
   "description": "PandoP 데이터 수집 프로그램",
   "author": "PandoP",
   "productName": "PandoP",
@@ -13,7 +13,7 @@
     "appId": "com.gpm.reservation",
     "productName": "PandoP",
     "copyright": "Copyright © 2025 PandoP",
-    "buildVersion": "0.9.0.0",
+    "buildVersion": "0.9.4.0",
     "files": [
       "index.html",
       "src/**/*",

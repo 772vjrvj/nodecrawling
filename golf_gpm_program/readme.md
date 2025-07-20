@@ -14,6 +14,7 @@ npm 11.4.1, node v22.16.0
 
 # PowerShell 관리자 권한으로 실행한 후
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+Y
 
 # 프로젝트 폴더로 이동
 cd E:\git\nodecrawling\golf_gpm_program
@@ -22,6 +23,10 @@ cd E:\git\nodecrawling\golf_gpm_program
 npm run build
 
 https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
+
+# 버전 수정
+"version": "0.9.1"
+"buildVersion": "0.9.1.0"
 
 
 ■ 매장정보
@@ -127,3 +132,10 @@ PandoK에서 띄운 브라우저를 닫은 다음에 ,
 PandoK에서 [시작]버튼만을 눌러 브라우저를 띄운 후에는 예약이 수집되지 않는 현상이 있습니다.
 예약정보 파싱 부분 점검시 가능하시면 같이 점검해봐주시면 좋겠습니다.
 쉽지 않다면, 파싱 부분 먼저 부탁 드리겠습니다.
+--> 파싱 부분 수정
+
+
+1.로그인 후>크롬만 닫음>시작 눌러 크롬 실행되면 예약>예약 수집안됨
+2.1번 이후 크롬을 다시 닫으면 아래와같은 팝업 발생
+--> 프로세스 강제 종료
+-- 0.9.4 ver
