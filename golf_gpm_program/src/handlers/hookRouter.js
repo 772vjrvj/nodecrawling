@@ -1,10 +1,10 @@
 //src/handlers/hookRouter.js
-const { patch, del } = require('../utils/api');
+const { patch, del, post } = require('../utils/api');
 const tokenManager = require('../services/tokenManager');
 const requestStore = {};
 const CRAWLING_SITE = 'GolfzonPark';
 
-const { toIsoKstFormat, compact } = require('../utils/common');
+const { toIsoKstFormat, compact, convertToUtcZFormat, extractDateYYMMDD } = require('../utils/common');
 
 function saveRequest(action, url, data) {
     requestStore[url] = { action, data };
@@ -184,6 +184,34 @@ async function dispatchAction(action, combinedData, token, storeId) {
                     nodeLog("📦 delete 모바일 고객:", JSON.stringify(payload, null, 2));
                     await del(token, storeId, payload, 'g');
                 }
+                break;
+            }
+
+            case 'detail': {
+                const entities = response?.entitys || [];
+                const date = entities.length > 0 ? extractDateYYMMDD(entities[0].bookingStartDate) : null;
+                const reservations = entities.map((entity) => compact({
+                    externalId: String(entity.bookingNumber),
+                    externalGroupId: entity.reserveNo ? String(entity.reserveNo) : undefined,
+                    name: String(entity.bookingName),
+                    phone: String(entity.cellNumber || ''),
+                    partySize: parseInt(entity.bookingCnt || 1),
+                    startDate: convertToUtcZFormat(entity.bookingStartDate),
+                    endDate: convertToUtcZFormat(entity.bookingEndDate),
+                    roomId: String(entity.machineNumber),
+                    paymented: entity.paymentYn === 'Y',
+                    paymentAmount: parseInt(entity.paymentTotAmount || 0),
+                    crawlingSite: CRAWLING_SITE,
+                    memo: entity.bookingMemo || '',
+                }, ['phone']));
+
+                const payload = { reservations };
+
+                nodeLog("📦 detail 예약 전체 payload:", JSON.stringify(payload, null, 2));
+                nodeLog("📦 detail 예약 date:", date);
+
+                // ✅ 서버로 한번에 배열 전송
+                await post(token, storeId, payload, 'p', date);
                 break;
             }
 

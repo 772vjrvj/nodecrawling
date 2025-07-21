@@ -139,3 +139,8 @@ PandoK에서 [시작]버튼만을 눌러 브라우저를 띄운 후에는 예약
 2.1번 이후 크롬을 다시 닫으면 아래와같은 팝업 발생
 --> 프로세스 강제 종료
 -- 0.9.4 ver
+
+
+
+노션 api 
+https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595

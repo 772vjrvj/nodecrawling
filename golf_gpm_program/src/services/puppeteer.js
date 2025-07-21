@@ -56,6 +56,8 @@ async function initBrowser(chromePath) {
 
         nodeLog('📄 페이지 객체 획득 완료');
 
+        await watchForAuthExpiration(page);
+
         return { browser, page };
     } catch (err) {
         nodeError('❌ 브라우저 생성 중 에러:', err.message);
@@ -162,9 +164,72 @@ async function login({ userId, password, token, chromePath }) {
     }
 }
 
+// ✅ 현재 예약 탭 찾기
+async function findReservationTab() {
+    if (!browser) throw new Error("브라우저가 실행되지 않았습니다.");
+
+    const pages = await browser.pages();
+    for (const p of pages) {
+        if (p.isClosed()) continue;
+        const url = p.url();
+        if (url.includes('/ui/booking')) {
+            const exists = await p.$('.dhx_cal_nav_button');
+            if (exists) {
+                nodeLog('✅ 예약 탭 찾음:', url);
+                return p;
+            }
+        }
+    }
+
+    throw new Error("❌ 예약 탭을 찾을 수 없습니다.");
+}
+
+async function watchForAuthExpiration(mainPage) {
+    const CHECK_INTERVAL = 10 * 1000; // 10초마다 검사
+
+    const checkLoop = async () => {
+        if (!mainPage || mainPage.isClosed()) return;
+
+        try {
+            const url = mainPage.url();
+            // if (!url.includes('golfzonpark.com')) return;
+
+            const text = await mainPage.$eval('.ico_alert_p', el => el.textContent).catch(() => null);
+
+            if (text && text.includes('인증이 만료되었습니다.')) {
+                nodeLog('⚠️ 인증 만료 감지됨 (자동 감시)');
+
+                const goBtn = await mainPage.$('.btn_golfzonpark_go');
+                if (goBtn) {
+                    await goBtn.click();
+                    nodeLog('🔄 인증 재이동 버튼 클릭 완료');
+                }
+
+                // 기존 예약 탭 닫기
+                const pages = await mainPage.browser().pages();
+                for (const p of pages) {
+                    if (!p.isClosed() && p.url().includes('/ui/booking')) {
+                        await p.close().then(() => nodeLog("❌ 기존 예약 탭 닫음 (인증 만료 감지 후)"));
+                    }
+                }
+
+                // 예약 버튼 다시 클릭
+                await mainPage.waitForSelector('button.booking__btn', { timeout: 10000 });
+                await mainPage.click('button.booking__btn');
+                nodeLog("📆 예약 탭 재실행 시도됨");
+            }
+        } catch (e) {
+            nodeError('❌ 인증 만료 감시 중 오류:', e.message);
+        }
+    };
+
+    setInterval(checkLoop, CHECK_INTERVAL);
+}
+
+
 // ✅ 현재 페이지 객체 반환
 function getPage() {
     return page;
 }
 
-module.exports = { initBrowser, login, getPage };
+module.exports = { initBrowser, login, getPage, findReservationTab };

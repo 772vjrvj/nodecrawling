@@ -8,14 +8,16 @@ const TARGETS = {
         edit:        /\/rest\/ui\/booking\/\d+\/edit(\?timestamp=|$)/,
         edit_move:   /\/rest\/ui\/booking\/\d+\/ajax-edit(\?timestamp=|$)/,
         delete:      /\/rest\/ui\/booking\/\d+\/delete(\?timestamp=|$)/,
-        delete_mobile: /\/rest\/ui\/polling\/booking\/\d+\?(?=.*\btimestamp=)(?=.*\bbookingStartDt=)(?=.*\bdata=)(?=.*\bbookingNumber=)/
+        delete_mobile: /\/rest\/ui\/polling\/booking\/\d+\?(?=.*\btimestamp=)(?=.*\bbookingStartDt=)(?=.*\bdata=)(?=.*\bbookingNumber=)/,
+        detail:        /\/rest\/ui\/booking\/\d+\?(?=.*\btimestamp=)(?=.*\bbookingStartDt=)/
     },
     response: {
         register:    /\/rest\/ui\/booking\/register(\?timestamp=|$)/,
         edit:        /\/rest\/ui\/booking\/\d+\/edit(\?timestamp=|$)/,
         edit_move:   /\/rest\/ui\/booking\/\d+\/ajax-edit(\?timestamp=|$)/,
         delete:      /\/rest\/ui\/booking\/\d+\/delete(\?timestamp=|$)/,
-        delete_mobile: /\/rest\/ui\/polling\/booking\/\d+\?(?=.*\btimestamp=)(?=.*\bbookingStartDt=)(?=.*\bdata=)(?=.*\bbookingNumber=)/
+        delete_mobile: /\/rest\/ui\/polling\/booking\/\d+\?(?=.*\btimestamp=)(?=.*\bbookingStartDt=)(?=.*\bdata=)(?=.*\bbookingNumber=)/,
+        detail:        /\/rest\/ui\/booking\/\d+\?(?=.*\btimestamp=)(?=.*\bbookingStartDt=)/
     }
 };
 
@@ -32,6 +34,28 @@ function attachRequestHooks(page) {
             'Cache-Control': 'no-cache',
             'Pragma': 'no-cache',
         };
+
+        // ✅ GET 방식 요청 처리 (쿼리스트링만 추출)
+        if (method === 'GET') {
+            for (const action in TARGETS.request) {
+                if (TARGETS.request[action].test(url)) {
+                    nodeLog(`➡️ [${method}] ${url}`);
+                    nodeLog(`🔍 [${action}] GET 요청 감지됨`);
+
+                    // ❓ saveRequest 를 사용하고 싶으면, 쿼리 파싱 필요
+                    const query = new URL(url).searchParams;
+                    const parsed = {};
+                    for (const [key, value] of query.entries()) {
+                        parsed[key] = value;
+                    }
+
+                    saveRequest(action, url, parsed); // 선택 사항
+                    nodeLog("📤 요청 쿼리 파싱 결과:", JSON.stringify(parsed, null, 2));
+
+                    break;
+                }
+            }
+        }
 
         // ✅ 요청 저장 및 분석 (POST/PUT only)
         if (['POST', 'PUT'].includes(method) && postData) {

@@ -2,8 +2,8 @@
 const axios = require('axios');
 
 
-// const BASE_URL = 'https://api.dev.24golf.co.kr'; //개발환경
-const BASE_URL = 'https://api.24golf.co.kr'; //운영환경
+const BASE_URL = 'https://api.dev.24golf.co.kr'; //개발환경
+// const BASE_URL = 'https://api.24golf.co.kr'; //운영환경
 
 /**
  * ✅ 파라미터 타입에 따라 URL 조립
@@ -11,14 +11,15 @@ const BASE_URL = 'https://api.24golf.co.kr'; //운영환경
  * - paramType: 'g' → group
  * - 그 외 → 기본 crawl
  */
-function buildUrl(storeId, paramType = null) {
+function buildUrl(storeId, paramType = null, date) {
     if (!storeId) throw new Error("❌ storeId is not set");
-
     let path = 'crawl';
     if (paramType === 'm') path = 'crawl/fields';
     else if (paramType === 'g') path = 'crawl/group';
-
-    return `${BASE_URL}/stores/${storeId}/reservation/${path}`;
+    else if (paramType === 'p') path = `${date}/add-missing`;
+    const url =  `${BASE_URL}/stores/${storeId}/reservation/${path}`;
+    nodeLog(`✅ buildUrl : ${url}`);
+    return url
 }
 
 /**
@@ -32,6 +33,7 @@ async function handleResponse(promise, methodName) {
     } catch (err) {
         if (err.response) {
             nodeError(`❌ ${methodName} 응답 오류 (${err.response.status}):`, err.response.data);
+            nodeError(`❌ ${methodName} 응답 오류 (${JSON.stringify(err.response, null, 2)})`);
         } else if (err.request) {
             nodeError(`❌ ${methodName} 요청 실패 (No response):`, err.message);
         } else {
@@ -44,12 +46,16 @@ async function handleResponse(promise, methodName) {
 /**
  * POST 요청
  */
-async function post(token, storeId, data, paramType = null) {
-    const url = buildUrl(storeId, paramType);
+async function post(token, storeId, data, paramType = null, date) {
+    const url = buildUrl(storeId, paramType, date);
     const headers = {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
     };
+    // ✅ 로그 출력
+    console.log("📡 POST 요청 URL:", url);
+    console.log("📦 POST 요청 Body:", JSON.stringify(data, null, 2));
+    console.log("📨 POST 요청 Headers:", JSON.stringify(headers, null, 2));
     return handleResponse(axios.post(url, data, { headers }), 'POST');
 }
 

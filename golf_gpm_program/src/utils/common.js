@@ -20,6 +20,23 @@ function toIsoKstFormat(kstStr) {
     }
 }
 
+function convertToUtcZFormat(inputDateStr) {
+    const localDate = new Date(inputDateStr);
+
+    // ISO 8601 Z 포맷으로 출력
+    return localDate.toISOString();  // e.g. "2025-07-20T12:00:00.000Z"
+}
+
+function extractDateYYMMDD(inputDateStr) {
+    const date = new Date(inputDateStr);
+
+    const yy = String(date.getFullYear()).slice(2); // "25"
+    const mm = String(date.getMonth() + 1).padStart(2, '0'); // "07"
+    const dd = String(date.getDate()).padStart(2, '0'); // "20"
+
+    return yy + mm + dd;
+}
+
 /**
  * null, 빈 문자열, 빈 배열을 제거한 객체 반환
  * @param {object} obj
@@ -44,5 +61,7 @@ function compact(obj, alwaysInclude = []) {
 
 module.exports = {
     toIsoKstFormat,
-    compact
+    compact,
+    convertToUtcZFormat,
+    extractDateYYMMDD
 };

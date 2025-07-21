@@ -5,11 +5,11 @@ const store = require('./store');
 const fs = require('fs');
 require('./utils/logger');
 const { dialog } = require('electron');
-
-
 const tokenManager = require('./services/tokenManager');
 const { fetchStoreInfo } = require('./utils/api');
 const { login } = require('./services/puppeteer');
+const { startApiServer } = require('./server/apiServer');
+
 
 function createWindow() {
     nodeLog("✅ createWindow 호출됨");
@@ -30,6 +30,9 @@ function createWindow() {
 app.whenReady().then(() => {
     nodeLog("🚀 앱 준비됨, 창 생성 시작");
     createWindow();
+
+    // ✅ API 서버 실행
+    startApiServer();
 });
 
 app.on('window-all-closed', () => {
