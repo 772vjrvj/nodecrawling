@@ -201,14 +201,19 @@ async function dispatchAction(action, combinedData, token, storeId) {
                     roomId: String(entity.machineNumber),
                     paymented: entity.paymentYn === 'Y',
                     paymentAmount: parseInt(entity.paymentTotAmount || 0),
-                    crawlingSite: CRAWLING_SITE,
-                    memo: entity.bookingMemo || '',
+                    crawlingSite: CRAWLING_SITE
                 }, ['phone']));
 
                 const payload = { reservations };
 
                 nodeLog("📦 detail 예약 전체 payload:", JSON.stringify(payload, null, 2));
                 nodeLog("📦 detail 예약 date:", date);
+
+                // ✅ 예약이 하나도 없으면 skip
+                if (reservations.length === 0) {
+                    nodeLog("📦 detail 예약 정보 없음, post() 호출 생략");
+                    break;
+                }
 
                 // ✅ 서버로 한번에 배열 전송
                 await post(token, storeId, payload, 'p', date);

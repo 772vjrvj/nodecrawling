@@ -30,6 +30,17 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 
 
 ■ 매장정보
+
+    매장ID : 687df837ccdd3048647c8e92
+    gpm 아이디 :jskzzang
+    gpm 비번 : jsk$13579
+    청주 용담 JS
+
+    ceo 정보
+    id:fogjin94
+    pw:cns0753!
+
+
     매장 아이디 : 6823189ccaf95dcb25d42273
     매장 : 골프존파크 죽전골프앤
     경영주id : bancj1
@@ -54,6 +65,10 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 
 ■ 한글 깨질시
     CMD : chcp 65001
+
+
+노션 api
+https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 
 
 설치경로
@@ -135,12 +150,27 @@ PandoK에서 [시작]버튼만을 눌러 브라우저를 띄운 후에는 예약
 --> 파싱 부분 수정
 
 
+
 1.로그인 후>크롬만 닫음>시작 눌러 크롬 실행되면 예약>예약 수집안됨
 2.1번 이후 크롬을 다시 닫으면 아래와같은 팝업 발생
 --> 프로세스 강제 종료
 -- 0.9.4 ver
 
 
+2025-07-22
+PandoP [완료]
+(1) 달력에서 날짜 변경시, 예약 수집이 되었다 안되었다가 함
+--> 판도서버 api add-missing에 memo 컬럼이 없는데 넣어서 요청하여 오류남
+--> 예약이 없는 경우는 skip 처리
+--> 조치 완료
 
-노션 api 
-https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
+
+AGP
+(2) AGP (후킹 버전), 일반 브라우저에서 아무런 예약 정보 변경없이, 
+예약 수정시 수집되지 않음 (PandoP에서는 정보수집됩니다.)
+
+
+
+
+
+

@@ -1,4 +1,5 @@
 // src/utils/api.js
+const util = require('util');
 const axios = require('axios');
 
 
@@ -32,8 +33,8 @@ async function handleResponse(promise, methodName) {
         return res.data;
     } catch (err) {
         if (err.response) {
-            nodeError(`❌ ${methodName} 응답 오류 (${err.response.status}):`, err.response.data);
-            nodeError(`❌ ${methodName} 응답 오류 (${JSON.stringify(err.response, null, 2)})`);
+            const { status, data } = err.response;
+            nodeError(`❌ ${methodName} 응답 오류 (${status}):`, data);
         } else if (err.request) {
             nodeError(`❌ ${methodName} 요청 실패 (No response):`, err.message);
         } else {
