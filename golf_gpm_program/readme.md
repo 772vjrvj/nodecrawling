@@ -40,7 +40,6 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
     id:fogjin94
     pw:cns0753!
 
-
     매장 아이디 : 6823189ccaf95dcb25d42273
     매장 : 골프존파크 죽전골프앤
     경영주id : bancj1
@@ -138,8 +137,6 @@ router.js 에 아래 추가
 
 
 
-
-
 ■ 2025-06-24
 안녕하세요.
 매장 운영하면서 확인된 이슈가 있는데요.
@@ -165,10 +162,27 @@ PandoP [완료]
 --> 조치 완료
 
 
-AGP
+AGP [판도 확인] 
 (2) AGP (후킹 버전), 일반 브라우저에서 아무런 예약 정보 변경없이, 
 예약 수정시 수집되지 않음 (PandoP에서는 정보수집됩니다.)
-
+--> PandoP, AGP 모두 수집 안됨
+--> 판도서버 확인필요
+--> roomId 정상으로 보냈는데 못찾는다고 나옴
+2025-07-22 23:40:06,930 - [판도] [api] : [PATCH] header : {'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4N2RmODM3Y2NkZDMwNDg2NDdjOGU5MiIsInJvbGUiOiJzaW5nbGVDcmF3bGVyIiwiZXhwIjo0OTA4OTUzMzQxfQ.vPFN9J0Rl-ke42oIrrQdW6NNc1RIHRaBHMHQJQVXO3k', 'Content-Type': 'application/json'}
+2025-07-22 23:40:06,930 - [판도] [api] : [PATCH] https://api.dev.24golf.co.kr/stores/687df837ccdd3048647c8e92/reservation/crawl
+{
+"externalId": "84396671",
+"roomId": "37207",
+"crawlingSite": "GolfzonPark",
+"name": "강현진",
+"phone": "010-6543-1105",
+"paymented": false,
+"partySize": 3,
+"startDate": "2025-07-23T09:30:00+09:00",
+"endDate": "2025-07-23T12:30:00+09:00",
+"externalGroupId": "35101868"
+}
+2025-07-22 23:40:06,983 - [판도] [api] : PATCH 응답 오류 (400): {"statusCode":400,"message":"Room not found","error":"ROOM_NOT_FOUND"}
 
 
 
