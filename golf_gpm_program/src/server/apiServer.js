@@ -131,7 +131,7 @@ function startApiServer(port = 32123) {
             } catch (err) {
                 nodeError('❌ 예약 달력 처리 실패:', err.message);
             }
-        }, 1000 * 60 * 5); // ⏱️ 5분 뒤 실행
+        }, 1000 * 60); // ⏱️ 5분 뒤 실행
     });
 
     http.createServer(app).listen(port, () => {
