@@ -3,8 +3,8 @@ const util = require('util');
 const axios = require('axios');
 
 
-// const BASE_URL = 'https://api.dev.24golf.co.kr'; //개발환경
-const BASE_URL = 'https://api.24golf.co.kr'; //운영환경
+require('dotenv').config(); // .env 파일 읽기
+const BASE_URL = process.env.API_BASE_URL || 'https://api.24golf.co.kr';
 
 /**
  * ✅ 파라미터 타입에 따라 URL 조립
@@ -34,7 +34,7 @@ async function handleResponse(promise, methodName) {
     } catch (err) {
         if (err.response) {
             const { status, data } = err.response;
-            nodeError(`❌ ${methodName} 응답 오류 (${status}):`, data);
+            nodeError(`❌ ${methodName} 응답 오류 (${status}): ${JSON.stringify(data, null, 2)}`);
         } else if (err.request) {
             nodeError(`❌ ${methodName} 요청 실패 (No response):`, err.message);
         } else {

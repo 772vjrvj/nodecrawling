@@ -225,7 +225,7 @@ async function dispatchAction(action, combinedData, token, storeId) {
                 return;
         }
     } catch (e) {
-        nodeError(`❌ dispatch 처리 실패 [${action}]`, e.message);
+        nodeError(`❌ dispatch 처리 실패 [${action}] - ${e.message}`);
     }
 }
 

@@ -13,24 +13,31 @@ function startApiServer(port = 32123) {
     const app = express();
 
     app.get('/reseration', async (req, res) => {
-        const { bookingDate } = req.query;
+        const { bookingDate, type } = req.query;
 
         if (!bookingDate) {
             nodeLog('❌ [API] bookingDate 누락');
             return res.status(400).json({ status: 'error', message: 'bookingDate 쿼리가 필요합니다' });
         }
 
-        nodeLog(`📥 예약 요청 수신 (bookingDate: ${bookingDate}) → 5분 뒤 실행 예정`);
+        const delayMs = type === 'm' ? 1000 * 60 * 5 : 1000 * 60; // "m"이면 5분, 아니면 1분
 
-        // ✅ 요청 수신 즉시 응답 (A는 이걸로 종료됨)
+        nodeLog(`📥 예약 요청 수신 (bookingDate: ${bookingDate}, type: ${type}) → ${delayMs / 1000 / 60}분 뒤 실행 예정`);
+
+        // ✅ 요청 수신 즉시 응답
         res.sendStatus(200);
 
-        // 🕔 5분 후 후킹 실행
+        // ⏱️ N분 후 후킹 실행
         setTimeout(async () => {
             try {
                 const page = await findReservationTab();
-                const { targetYear, targetMonth } = parseBookingDate(bookingDate);
 
+                // ✅ 화면 새로고침
+                await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
+                nodeLog('🔄 페이지 새로고침 완료 → 2초 대기 후 진행');
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                const { targetYear, targetMonth } = parseBookingDate(bookingDate);
 
                 // 1. 달력 열려 있는지 확인
                 const calendarExists = await page.$('.vfc-main-container');
@@ -73,7 +80,7 @@ function startApiServer(port = 32123) {
                 for (let i = 0; i < clicks; i++) {
                     await page.waitForSelector(selector, { timeout: 3000 });
                     await page.click(selector);
-                    await new Promise(resolve => setTimeout(resolve, 500)); // ← 이 부분 수정됨
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 }
 
                 // 5. 날짜(day) 클릭 처리
@@ -105,14 +112,14 @@ function startApiServer(port = 32123) {
 
                 if (!clicked) {
                     nodeLog(`❌ ${targetDay}일자 클릭 실패: 해당 날짜를 찾을 수 없습니다.`);
-                }else{
+                } else {
                     nodeLog(`✅ ${targetDay}일자 클릭 완료`);
 
                     const eventIds = await page.evaluate(() => {
                         const result = [];
 
                         // 1. 예약 영역 기준
-                        const cols = document.querySelectorAll('.dhx_timeline_data_col > div'); // 9개의 자식 div
+                        const cols = document.querySelectorAll('.dhx_timeline_data_col > div');
 
                         cols.forEach(col => {
                             const children = col.children;
@@ -131,7 +138,7 @@ function startApiServer(port = 32123) {
             } catch (err) {
                 nodeError('❌ 예약 달력 처리 실패:', err.message);
             }
-        }, 1000 * 60); // ⏱️ 5분 뒤 실행
+        }, delayMs);
     });
 
     http.createServer(app).listen(port, () => {
