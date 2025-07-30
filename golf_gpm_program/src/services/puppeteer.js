@@ -33,7 +33,9 @@ async function initBrowser(chromePath) {
             executablePath: chromePath,
             defaultViewport: null,
             args: [
-                '--window-size=1200,1000',
+                // '--window-size=1200,1000',
+                '--window-size=800,300',
+                '--window-position=0,800',
                 '--disable-infobars',
                 '--disable-features=AutofillServerCommunication',
                 '--disable-blink-features=AutomationControlled'
@@ -129,6 +131,16 @@ async function login({ userId, password, token, chromePath }) {
 
         if (!newPage || newPage.isClosed()) {
             throw new Error("❌ 예약 페이지 탭 생성 실패 또는 닫힘 상태");
+        }
+
+        // ✅ 기존 첫 번째 탭 닫기
+        if (page && !page.isClosed()) {
+            try {
+                await page.close();
+                nodeLog('❌ 기존 첫 번째 탭 닫음');
+            } catch (e) {
+                nodeError('❌ 첫 번째 탭 닫기 실패:', e.message);
+            }
         }
 
         await newPage.bringToFront();

@@ -51,7 +51,7 @@ function startApiServer(port = 32123) {
                 }
 
                 // 2. 년월 요소 로딩 대기
-                await page.waitForSelector('.vfc-top-date.vfc-center', { timeout: 1000 });
+                await page.waitForSelector('.vfc-top-date.vfc-center', { timeout: 5000 });
 
                 // 3. 현재 년/월 추출
                 const { currentYear, currentMonth } = await page.evaluate(() => {
