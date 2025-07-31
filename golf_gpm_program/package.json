@@ -1,31 +1,27 @@
 {
   "name": "golf-gpm-program",
-  "version": "0.9.9",
-  "description": "PandoP 데이터 수집 프로그램",
-  "author": "PandoP",
-  "productName": "PandoP",
+  "version": "0.10.0",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
   },
   "build": {
-    "appId": "com.gpm.reservation",
-    "productName": "PandoP",
-    "copyright": "Copyright © 2025 PandoP",
-    "buildVersion": "0.9.9.0",
+    "asar": true,
     "files": [
       "index.html",
       "src/**/*",
       "logs/**/*",
+      "assets/icons/icon.ico",
       "package.json"
     ],
     "extraFiles": [
       ".env"
     ],
-    "directories": {
-      "output": "dist"
-    },
+    "extraResources": [
+      { "from": "resources/python", "to": "python" }
+    ],
+    "directories": { "output": "dist" },
     "win": {
       "target": "nsis",
       "icon": "assets/icons/icon.ico",

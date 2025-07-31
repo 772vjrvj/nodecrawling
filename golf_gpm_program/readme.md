@@ -75,8 +75,8 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 C:\Program Files\PandoP
 
 로그 경로
-C:\Users\<사용자>\AppData\Roaming\golf-gpm-program\logs
-C:\Users\<사용자>\AppData\Roaming\GPMReservation\logs
+C:\Users\772vj\AppData\Roaming\golf-gpm-program\logs
+C:\Users\772vj\AppData\Roaming\GPMReservation\logs
 
 C:\Users\772vj\AppData\Roaming\PandoP\logs
 C:\Users\<사용자>\AppData\Roaming\PandoP\logs
