@@ -19,7 +19,8 @@
       ".env"
     ],
     "extraResources": [
-      { "from": "resources/python", "to": "python" }
+      { "from": "resources/python", "to": "python" },
+      { "from": "logs", "to": "logs" }
     ],
     "directories": { "output": "dist" },
     "win": {

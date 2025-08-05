@@ -162,26 +162,6 @@ async function login({ userId, password, token, chromePath }) {
 
         nodeLog('🟢 예약 페이지 접근됨:', newPage.url());
 
-        // 여기에 추가하세요
-        setInterval(async () => {
-            const target = getPage();
-            if (target && !target.isClosed()) {
-                try {
-                    await target.reload({ waitUntil: 'networkidle0' });
-                    nodeLog('♻️ [세션유지] 자동 새로고침 완료');
-
-                    await target.evaluate(() => {
-                        return fetch('/mypage', { credentials: 'include' });
-                    }).then(() => {
-                        nodeLog('🔄 [세션유지] 내부 API 호출 성공');
-                    }).catch(() => {
-                        nodeLog('⚠️ [세션유지] 내부 API 호출 실패 (무시 가능)');
-                    });
-                } catch (e) {
-                    nodeError('❌ [세션유지] 새로고침 중 오류:', e.message);
-                }
-            }
-        }, 1800000); // 30분 1800000
 
         // 후킹 실패 시 대비
         setTimeout(async () => {
