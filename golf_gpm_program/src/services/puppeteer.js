@@ -190,6 +190,27 @@ async function login({ userId, password, token, chromePath }) {
 
         nodeLog('🟢 예약 페이지 접근됨:', newPage.url());
 
+        // 여기에 추가하세요
+        setInterval(async () => {
+            const target = getPage();
+            if (target && !target.isClosed()) {
+                try {
+                    await target.reload({ waitUntil: 'networkidle0' });
+                    nodeLog('♻️ [세션유지] 자동 새로고침 완료');
+
+                    await target.evaluate(() => {
+                        return fetch('/mypage', { credentials: 'include' });
+                    }).then(() => {
+                        nodeLog('🔄 [세션유지] 내부 API 호출 성공');
+                    }).catch(() => {
+                        nodeLog('⚠️ [세션유지] 내부 API 호출 실패 (무시 가능)');
+                    });
+                } catch (e) {
+                    nodeError('❌ [세션유지] 새로고침 중 오류:', e.message);
+                }
+            }
+        }, 1800000); // 30분 1800000
+
         // 후킹 실패 시 대비
         setTimeout(async () => {
             if (!hookConnected) {
@@ -251,10 +272,11 @@ async function findReservationTab() {
 
 // ───────────────────────────────────────────────────────────────────────────────
 // 인증 만료 감시
+// https://gpmui.golfzonpark.com/fc/error
 // ───────────────────────────────────────────────────────────────────────────────
 async function watchForAuthExpiration(mainPageParam) {
     const CHECK_INTERVAL = 5 * 1000; // 5초마다 검사
-
+    nodeLog('✅ 인증 만료 확인 시작');
     const checkLoop = async () => {
         const targetMain = mainPageParam && !mainPageParam.isClosed() ? mainPageParam : mainPage;
         if (!targetMain || targetMain.isClosed()) return;
@@ -330,19 +352,46 @@ async function restoreChromeIfMinimized() {
             nodeLog('restoreChromeIfMinimized: 브라우저 프로세스 없음');
             return;
         }
+
         const chromePid = browser.process().pid;
+        const exe = getWatcherExePath(); // 새로 만든 EXE 경로 함수
+        nodeLog('[watcher exe 실행]', exe);
 
-        const script = getWatcherScriptPath();
-        nodeLog('[watcher] script:', script);
-
-        const py = spawn(PYTHON, [script, '--restore-once', '--pid', String(chromePid)]);
+        const py = spawn(exe, ['--restore-once', '--pid', String(chromePid)]);
 
         py.stdout.on('data', data => nodeLog('[PYTHON]', data.toString().trim()));
         py.stderr.on('data', data => nodeError('[PYTHON ERROR]', data.toString().trim()));
         py.on('close', code => nodeLog(`[PYTHON] watcher 종료 (code: ${code})`));
+
     } catch (e) {
         nodeError('⚠️ Chrome 복원 중 오류:', e.message);
     }
 }
+
+function getWatcherExePath() {
+    const file = 'chrome_minimized_watcher.exe';
+
+    // 개발 중 경로: <project>/resources/python/chrome_minimized_watcher.exe
+    const devPath = path.join(__dirname, '..', '..', 'resorces', 'python', file);
+    if (!app || !app.isPackaged) return devPath;
+
+    // 배포용 경로 후보들
+    const resourcesPath = process.resourcesPath;                 // ...\resources
+    const appRoot = path.dirname(resourcesPath);                 // ...\앱루트
+
+    const candidates = [
+        path.join(resourcesPath, 'python', file),
+        path.join(appRoot,       'python', file),
+        path.join(resourcesPath, 'resources', 'python', file),
+        path.join(resourcesPath, 'app.asar.unpacked', 'resources', 'python', file),
+    ];
+
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
+
+    throw new Error('[watcher EXE not found]\n' + candidates.join('\n'));
+}
+
 
 module.exports = { initBrowser, login, getPage, findReservationTab };

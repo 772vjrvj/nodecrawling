@@ -34,8 +34,8 @@ function startApiServer(port = 32123) {
 
                 // ✅ 화면 새로고침
                 await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
-                nodeLog('🔄 페이지 새로고침 완료 → 2초 대기 후 진행');
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                nodeLog('🔄 페이지 새로고침 완료 → 3초 대기 후 진행');
+                await new Promise(resolve => setTimeout(resolve, 3000));
 
                 const { targetYear, targetMonth } = parseBookingDate(bookingDate);
 
@@ -138,7 +138,7 @@ function startApiServer(port = 32123) {
             } catch (err) {
                 nodeError('❌ 예약 달력 처리 실패:', err.message);
             }
-        }, 5000);
+        }, delayMs);
     });
 
     http.createServer(app).listen(port, () => {

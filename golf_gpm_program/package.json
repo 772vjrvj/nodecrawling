@@ -1,6 +1,6 @@
 {
   "name": "golf-gpm-program",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
