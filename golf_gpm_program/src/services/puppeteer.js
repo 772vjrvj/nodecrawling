@@ -3,44 +3,18 @@
 const puppeteer = require('puppeteer');
 const { attachRequestHooks } = require('../handlers/router');
 const { spawn } = require('child_process');
+const { BrowserWindow } = require('electron');
 
-// ───────────────────────────────────────────────────────────────────────────────
+
 // Optional Electron deps + path/fs (빌드/개발 모두에서 안전하게 경로 계산)
-// ───────────────────────────────────────────────────────────────────────────────
 const path = require('path');
 const fs = require('fs');
 let app = null; try { ({ app } = require('electron')); } catch { app = null; }
 
-// 시스템 Python 경로 (필요 시 .env 또는 시스템 환경변수에서 절대경로로 고정)
-const PYTHON = process.env.PYTHON || 'python';
 
-// 파이썬 watcher 스크립트의 절대 경로 계산
-function getWatcherScriptPath() {
-    const file = 'chrome_minimized_watcher.py';
+let watcherProcess = null;
 
-    // 개발 경로: <project>/resources/python/...
-    const devPath = path.join(__dirname, '..', '..', 'resources', 'python', file);
-    if (!app || !app.isPackaged) return devPath;
-
-    // 배포 경로 후보들
-    const resourcesPath = process.resourcesPath;                 // ...\PandoP\resources
-    const appRoot       = path.dirname(resourcesPath);           // ...\PandoP
-    const candidates = [
-        path.join(resourcesPath, 'python', file),                  // extraResources 일 때
-        path.join(appRoot,       'python', file),                  // 지금처럼 extraFiles 로 앱 루트에 있을 때  👈
-        path.join(resourcesPath, 'resources', 'python', file),     // 환경별 변형 대비
-        path.join(resourcesPath, 'app.asar.unpacked', 'resources', 'python', file)
-    ];
-
-    for (const p of candidates) {
-        if (fs.existsSync(p)) return p;
-    }
-    throw new Error('[watcher] not found: \n' + candidates.join('\n'));
-}
-
-// ───────────────────────────────────────────────────────────────────────────────
 // 내부 상태
-// ───────────────────────────────────────────────────────────────────────────────
 let browser = null;
 let page = null;
 
@@ -48,9 +22,8 @@ let page = null;
 let mainPage = null;        // 로그인/메인 탭
 let reservationPage = null; // 예약 탭
 
-// ───────────────────────────────────────────────────────────────────────────────
+
 // 브라우저 초기화
-// ───────────────────────────────────────────────────────────────────────────────
 async function initBrowser(chromePath) {
     // 기존 브라우저 완전 종료
     if (browser) {
@@ -114,9 +87,8 @@ async function initBrowser(chromePath) {
     }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
+
 // 로그인 & 예약 페이지 진입
-// ───────────────────────────────────────────────────────────────────────────────
 async function login({ userId, password, token, chromePath }) {
     try {
         const result = await initBrowser(chromePath);
@@ -235,9 +207,8 @@ async function login({ userId, password, token, chromePath }) {
     }
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
+
 // 예약 탭 찾기
-// ───────────────────────────────────────────────────────────────────────────────
 async function findReservationTab() {
     await restoreChromeIfMinimized(); // 최소화 상태면 복원 시도
 
@@ -270,82 +241,75 @@ async function findReservationTab() {
     throw new Error('❌ 예약 탭을 찾을 수 없습니다.');
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
+
+
+let authInterval = null;
+
 // 인증 만료 감시
 // https://gpmui.golfzonpark.com/fc/error
-// ───────────────────────────────────────────────────────────────────────────────
+// puppeteer 쪽 (예: services/puppeteer.js 내부)
 async function watchForAuthExpiration(mainPageParam) {
-    const CHECK_INTERVAL = 5 * 1000; // 5초마다 검사
+    if (authInterval) return; // ✅ 중복 감지 방지
+
+    const CHECK_INTERVAL = 5000;
     nodeLog('✅ 인증 만료 확인 시작');
+
     const checkLoop = async () => {
-        const targetMain = mainPageParam && !mainPageParam.isClosed() ? mainPageParam : mainPage;
-        if (!targetMain || targetMain.isClosed()) return;
-
         try {
-            const text = await targetMain.$eval('.ico_alert_p', el => el.textContent).catch(() => null);
+            const browser = mainPageParam.browser?.();
+            if (!browser || !browser.isConnected?.()) {
+                nodeLog('❌ 인증 감시 중단: 브라우저 인스턴스 없음 또는 연결 끊김');
+                return;
+            }
 
-            if (text && text.includes('인증이 만료되었습니다.')) {
-                nodeLog('⚠️ 인증 만료 감지됨 (자동 감시)');
+            const pages = await browser.pages();
 
-                const goBtn = await targetMain.$('.btn_golfzonpark_go');
-                if (goBtn) {
-                    await goBtn.click();
-                    nodeLog('🔄 인증 재이동 버튼 클릭 완료');
-                }
+            for (const page of pages) {
+                if (page.isClosed()) continue;
 
-                // 기존 예약 탭 닫기
-                const pages = await targetMain.browser().pages();
-                for (const p of pages) {
-                    if (!p.isClosed() && p.url().includes('/ui/booking')) {
-                        await p.close().then(() => nodeLog('❌ 기존 예약 탭 닫음 (인증 만료 감지 후)'));
-                    }
-                }
+                try {
+                    const el = await page.$('.ico_alert_p');
+                    if (!el) continue;
 
-                // 예약 버튼 다시 클릭 → 새 탭 후킹
-                await targetMain.waitForSelector('button.booking__btn', { timeout: 10000 });
+                    const text = await page.evaluate(el => el.textContent.trim(), el);
+                    nodeLog(`🔍 인증 메시지: ${text}`);
 
-                const reOpenPromise = new Promise(resolve => {
-                    targetMain.browser().once('targetcreated', async target => {
-                        try {
-                            const np = await target.page();
-                            if (np && !np.isClosed()) {
-                                attachRequestHooks(np);
-                                reservationPage = np;
-                                nodeLog('🔁 인증 만료 복구: 새 예약 탭 후킹 및 참조 갱신');
-                                resolve(np);
-                            } else {
-                                resolve(null);
-                            }
-                        } catch {
-                            resolve(null);
+                    if (text.includes('인증이 만료되었습니다.')) {
+                        nodeLog('⚠️ 인증 만료 감지됨');
+
+                        clearInterval(authInterval);
+                        authInterval = null;
+
+                        await shutdownBrowser();
+                        nodeLog('🛑 Puppeteer 브라우저 종료 완료');
+
+                        const win = BrowserWindow.getAllWindows()[0];
+                        if (win) {
+                            win.webContents.send('auth-expired');
+                            nodeLog('📤 renderer에 auth-expired 전송 완료');
                         }
-                    });
-                });
-
-                await targetMain.click('button.booking__btn');
-                await reOpenPromise;
-                nodeLog('📆 예약 탭 재실행 시도됨');
+                        return;
+                    }
+                } catch (e) {
+                    nodeError('❌ 페이지 인증 감시 중 오류:', e.message);
+                }
             }
         } catch (e) {
-            nodeError('❌ 인증 만료 감시 중 오류:', e.message);
+            nodeError('❌ 전체 인증 감시 루프 오류:', e.message);
         }
     };
 
-    setInterval(checkLoop, CHECK_INTERVAL);
+    authInterval = setInterval(checkLoop, CHECK_INTERVAL);
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
 // 현재 페이지 반환 (우선순위: 예약 → 메인 → 기본)
-// ───────────────────────────────────────────────────────────────────────────────
 function getPage() {
     if (reservationPage && !reservationPage.isClosed()) return reservationPage;
     if (mainPage && !mainPage.isClosed()) return mainPage;
     return page;
 }
 
-// ───────────────────────────────────────────────────────────────────────────────
 // Chrome 최소화 복원 (Python watcher 실행)
-// ───────────────────────────────────────────────────────────────────────────────
 async function restoreChromeIfMinimized() {
     try {
         if (!browser || !browser.process || !browser.process()) {
@@ -357,22 +321,24 @@ async function restoreChromeIfMinimized() {
         const exe = getWatcherExePath(); // 새로 만든 EXE 경로 함수
         nodeLog('[watcher exe 실행]', exe);
 
-        const py = spawn(exe, ['--restore-once', '--pid', String(chromePid)]);
+        watcherProcess = spawn(exe, ['--restore-once', '--pid', String(chromePid)]);
 
-        py.stdout.on('data', data => nodeLog('[PYTHON]', data.toString().trim()));
-        py.stderr.on('data', data => nodeError('[PYTHON ERROR]', data.toString().trim()));
-        py.on('close', code => nodeLog(`[PYTHON] watcher 종료 (code: ${code})`));
+        watcherProcess.stdout.on('data', data => nodeLog('[PYTHON]', data.toString().trim()));
+        watcherProcess.stderr.on('data', data => nodeError('[PYTHON ERROR]', data.toString().trim()));
+        watcherProcess.on('close', code => nodeLog(`[PYTHON] watcher 종료 (code: ${code})`));
 
     } catch (e) {
         nodeError('⚠️ Chrome 복원 중 오류:', e.message);
     }
 }
 
+
+//파이썬 실행경로 리턴
 function getWatcherExePath() {
     const file = 'chrome_minimized_watcher.exe';
 
     // 개발 중 경로: <project>/resources/python/chrome_minimized_watcher.exe
-    const devPath = path.join(__dirname, '..', '..', 'resorces', 'python', file);
+    const devPath = path.join(__dirname, '..', '..', 'resources', 'python', file);
     if (!app || !app.isPackaged) return devPath;
 
     // 배포용 경로 후보들
@@ -393,5 +359,39 @@ function getWatcherExePath() {
     throw new Error('[watcher EXE not found]\n' + candidates.join('\n'));
 }
 
+//브라우저 종료
+async function shutdownBrowser() {
+    if (browser) {
+        try {
+            if (browser.process()) {
+                browser.process().kill('SIGKILL');
+                nodeLog('🛑 Puppeteer 프로세스 강제 종료');
+            } else {
+                await browser.close();
+                nodeLog('🛑 Puppeteer 브라우저 정상 종료');
+            }
+        } catch (e) {
+            nodeError('❌ shutdownBrowser 오류:', e.message);
+        } finally {
+            browser = null;
+            page = null;
+            mainPage = null;
+            reservationPage = null;
 
-module.exports = { initBrowser, login, getPage, findReservationTab };
+            if (authInterval) {
+                clearInterval(authInterval);
+                authInterval = null;
+            }
+
+            // ✅ watcherProcess 종료
+            if (watcherProcess && !watcherProcess.killed) {
+                watcherProcess.kill('SIGKILL');
+                nodeLog('🧹 watcher 프로세스 종료 완료');
+                watcherProcess = null;
+            }
+        }
+    }
+}
+
+
+module.exports = { login, findReservationTab, shutdownBrowser };

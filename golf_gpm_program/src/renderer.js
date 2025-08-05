@@ -179,6 +179,14 @@ async function startAction() {
         return;
     }
 
+    // ✅ 버튼 텍스트 변경 + 비활성화
+    const startBtn = document.querySelector('.info-box button[onclick="startAction()"]');
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.style.backgroundColor = '#aaa';  // 선택: 비활성화 스타일
+        console.log("🔒 시작 버튼 비활성화 완료");
+    }
+
     // ✅ 매장 정보 & 토큰 요청
     const result = await window.electronAPI.fetchStoreInfo(storeId);
     if (!result || !result.store) {
@@ -186,7 +194,7 @@ async function startAction() {
         return;
     }
 
-    const { token, store } = result;
+    const { store } = result;
     const name = store?.name || '-';
     const branch = store?.branch || '-';
 
@@ -249,3 +257,9 @@ async function browseChromePath() {
         document.getElementById("chrome-path").value = selected;
     }
 }
+
+window.electronAPI.onAuthExpired(() => {
+    console.log('🚨 인증 만료 감지됨 → 시작 버튼 자동 클릭');
+    startAction();
+});
+

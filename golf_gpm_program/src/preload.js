@@ -27,11 +27,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return await ipcRenderer.invoke('fetch-store-info', storeId);
     },
 
-    // 브라우저 로그를 메인 프로세스로 전송
-    logToMain: (message) => {
-        ipcRenderer.send('log-from-renderer', message);
-    },
-
     // ✅ 추가된 부분
     getChromePath: async () => {
         const result = await ipcRenderer.invoke('get-chrome-path');
@@ -41,11 +36,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     openChromePathDialog: () => ipcRenderer.invoke('open-chrome-path-dialog'),
 
+
     onCrawlError: (callback) => {
         ipcRenderer.on('crawl-error', (_, message) => {
             callback(message);
         });
     },
+
+    onAuthExpired: (callback) => {
+        ipcRenderer.on('auth-expired', () => {
+            callback();
+        });
+    },
+
+    quitApp: () => ipcRenderer.invoke('quit-app')
 
 });
 

@@ -7,8 +7,9 @@ require('./utils/logger');
 const { dialog } = require('electron');
 const tokenManager = require('./services/tokenManager');
 const { fetchStoreInfo } = require('./utils/api');
-const { login } = require('./services/puppeteer');
+const { login, shutdownBrowser } = require('./services/puppeteer');
 const { startApiServer } = require('./server/apiServer');
+const { stopApiServer } = require('./server/apiServer');
 
 
 function createWindow() {
@@ -27,13 +28,6 @@ function createWindow() {
     win.loadFile('index.html');
 }
 
-app.whenReady().then(() => {
-    nodeLog("🚀 앱 준비됨, 창 생성 시작");
-    createWindow();
-
-    // ✅ API 서버 실행
-    startApiServer();
-});
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
@@ -42,10 +36,12 @@ app.on('window-all-closed', () => {
     }
 });
 
+
 app.on('will-quit', () => {
     nodeLog("❎ 앱 종료 감지 → 토큰 갱신 중지");
     tokenManager.stop();
 });
+
 
 ipcMain.on('save-settings', (event, { key, value }) => {
     nodeLog(`💾 [저장 요청] key: ${key}, value: ${value}`);
@@ -53,28 +49,32 @@ ipcMain.on('save-settings', (event, { key, value }) => {
     nodeLog(`✅ 저장 완료. 현재값: ${store.get(key)}`);
 });
 
-ipcMain.handle('load-settings', (event, key) => {
-    const value = store.get(key);
-    nodeLog(`📥 [설정 불러오기 요청] key: "${key}" → value: "${value}"`);
-    return value;
-});
 
 ipcMain.on('log-from-renderer', (event, message) => {
     nodeLog(`[RENDER] ${message}`);
 });
+
 
 ipcMain.on('start-crawl', async (event, { userId, password, storeId, chromePath }) => {
     try {
         await tokenManager.start(storeId);
         const token = await tokenManager.getTokenAsync();
         await login({ userId, password, token, chromePath });
+        startApiServer();
+
     } catch (err) {
         nodeError("❌ start-crawl 처리 중 에러:", err);
-
-        // 렌더러로 에러 전송
         event.sender.send('crawl-error', err.message || '크롤링 도중 오류 발생');
     }
 });
+
+
+ipcMain.handle('load-settings', (event, key) => {
+    const value = store.get(key);
+    nodeLog(`📥 [설정 불러오기 요청] key: "${key}" → value: "${value}"`);
+    return value;
+});
+
 
 ipcMain.handle('fetch-store-info', async (event, storeId) => {
     nodeLog(`🔍 매장 정보 요청 수신 → storeId: ${storeId}`);
@@ -109,6 +109,7 @@ ipcMain.handle('get-chrome-path', () => {
 });
 
 
+//크롬 실행 파일 선택
 ipcMain.handle('open-chrome-path-dialog', async () => {
     const result = await dialog.showOpenDialog({
         title: '크롬 실행 파일 선택',
@@ -124,4 +125,18 @@ ipcMain.handle('open-chrome-path-dialog', async () => {
 
     nodeLog("❌ 크롬 경로 선택 취소됨");
     return null;
+});
+
+
+ipcMain.handle('quit-app', async () => {
+    nodeLog('🛑 전체 종료 처리 시작');
+    await shutdownBrowser();
+    stopApiServer();
+    app.quit();
+});
+
+
+app.whenReady().then(() => {
+    nodeLog("🚀 앱 준비됨, 창 생성 시작");
+    createWindow();
 });
