@@ -55,9 +55,10 @@ async function initBrowser(chromePath) {
                 '--window-size=800,300',
                 '--window-position=0,800',
                 '--disable-infobars',
+                '--mute-audio',
                 '--disable-features=AutofillServerCommunication',
-                '--disable-blink-features=AutomationControlled',
-            ],
+                '--disable-blink-features=AutomationControlled'
+            ]
         });
 
         nodeLog('🚀 새 브라우저 인스턴스 실행됨');

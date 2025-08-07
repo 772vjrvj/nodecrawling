@@ -1,18 +1,19 @@
 {
-  "name": "golf-gpm-program",
-  "version": "0.11.0",
+  "name": "PandoP",
+  "version": "0.12.0",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder"
   },
   "build": {
+    "productName": "PandoP",
     "asar": true,
     "files": [
       "index.html",
       "src/**/*",
       "logs/**/*",
-      "assets/icons/icon.ico",
+      "assets/icons/판도P-ICON.ico",
       "package.json"
     ],
     "extraFiles": [
@@ -22,17 +23,19 @@
       { "from": "resources/python", "to": "python" },
       { "from": "logs", "to": "logs" }
     ],
-    "directories": { "output": "dist" },
+    "directories": {
+      "output": "dist"
+    },
     "win": {
       "target": "nsis",
-      "icon": "assets/icons/icon.ico",
+      "icon": "assets/icons/판도P-ICON.ico",
       "publisherName": "PandoP",
       "legalTrademarks": "© 2025 PandoP"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "PandoP"

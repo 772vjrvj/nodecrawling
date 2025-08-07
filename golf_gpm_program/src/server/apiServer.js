@@ -48,8 +48,8 @@ function getReservationLogPath() {
 // ─────────────────────────────────────────────────────────
 function getNow() {
     const now = new Date();
-    const pad = (n) => n.toString().padStart(2, '0');
-    return `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} ${pad(now.getHours())}.${pad(now.getMinutes())}.${pad(now.getSeconds())}`;
+    const pad = (n, width = 2) => n.toString().padStart(width, '0');
+    return `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${pad(now.getMilliseconds(), 3)}`;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -66,7 +66,6 @@ function parseBookingDate(bookingDate) {
 // ─────────────────────────────────────────────────────────
 function writeLog(entry) {
     const logPath = getReservationLogPath();
-    nodeLog('📝 로그 기록 완료:', entry, '→ 저장 위치:', logPath);
     const dir = path.dirname(logPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -94,8 +93,34 @@ function writeLog(entry) {
 // 예약 처리 재시도 (1건)
 // ─────────────────────────────────────────────────────────
 async function handleReservationRetry(logEntry) {
-    const { bookingDate, type } = logEntry;
-    nodeLog(`🔁 예약 재시도 시작 (${bookingDate}, type=${type})`);
+    const { bookingDate, retryCnt } = logEntry;
+
+    if (retryCnt > 5) {
+        logEntry.result = 'stop';
+        logEntry.error = 'retry limit exceeded';
+
+        nodeLog(`⚠️ 예약 재시도 중단 (id=${logEntry.id}) → retryCnt=${retryCnt} > 5`);
+        nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
+
+        // 로그 파일 업데이트
+        try {
+            const logPath = getReservationLogPath();
+            const raw = fs.readFileSync(logPath, 'utf-8');
+            const data = raw.trim() ? JSON.parse(raw) : [];
+            const idx = data.findIndex(e => e.id === logEntry.id);
+            if (idx !== -1) {
+                data[idx] = logEntry;
+                fs.writeFileSync(logPath, JSON.stringify(data, null, 2), 'utf-8');
+                nodeLog('📌 로그 결과 갱신 완료 (중단)');
+            }
+        } catch (e) {
+            nodeError('❌ [중단] 로그 갱신 실패:', e.message);
+        }
+
+        return; // 조기 종료
+    }
+
+    nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
 
     try {
         const page = await findReservationTab();
@@ -104,7 +129,10 @@ async function handleReservationRetry(logEntry) {
         await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
         nodeLog('🔄 페이지 새로고침 완료');
 
+        nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
+
         await new Promise(resolve => setTimeout(resolve, 3000));
+        nodeLog('3초 대기 완료');
 
         const { targetYear, targetMonth } = parseBookingDate(bookingDate);
         const calendarExists = await page.$('.vfc-main-container');
@@ -175,7 +203,7 @@ async function handleReservationRetry(logEntry) {
         try {
             const raw = fs.readFileSync(logPath, 'utf-8');
             const data = raw.trim() ? JSON.parse(raw) : [];
-            const idx = data.findIndex(e => e.bookingDate === logEntry.bookingDate && e.requestDate === logEntry.requestDate);
+            const idx = data.findIndex(e => e.id === logEntry.id);
             if (idx !== -1) {
                 data[idx] = logEntry;
                 fs.writeFileSync(logPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -200,7 +228,12 @@ function retryFailedReservations() {
         return;
     }
 
-    const failEntries = data.filter(entry => entry.result !== 'success');
+    const failEntries = data.filter(entry =>
+        entry.result !== 'success' &&
+        entry.result !== 'stop' &&
+        entry.retryCnt <= 5
+    );
+
     if (failEntries.length === 0) {
         nodeLog('✅ 실패 로그 없음 → 재시도 생략');
         return;
@@ -209,10 +242,26 @@ function retryFailedReservations() {
     nodeLog(`🔁 실패한 예약 ${failEntries.length}건 재시도 시작`);
 
     failEntries.forEach((entry, idx) => {
+        entry.retryCnt++; // ✅ retryCnt 1 증가
+
+        nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, id=${entry.bookingDate}, retryCnt=${entry.retryCnt})`);
+
         setTimeout(() => {
             handleReservationRetry(entry);
         }, 5000 * idx);
     });
+}
+
+let lastTime = '';
+let counter = 0;
+
+function generateId() {
+    const now = getNow();
+    if (now !== lastTime) {
+        counter = 0;
+        lastTime = now;
+    }
+    return `${now}-${counter++}`;
 }
 
 async function startApiServer(port = 32123) {
@@ -227,14 +276,18 @@ async function startApiServer(port = 32123) {
 
         const delayMs = type === 'm' ? 1000 * 60 * 5 : 1000 * 60;
         const logEntry = {
-            bookingDate,
-            type,
+            id: generateId(),
+            bookingDate: bookingDate,
+            type: type,
+            channel: type === 'm' ? '모바일' : '전화',
             requestDate: getNow(),
             result: 'pending',
-            error: null
+            error: null,
+            retryCnt: 0,
         };
 
-        nodeLog(`📥 예약 요청 수신 (${bookingDate}, type=${type}) → ${delayMs / 60000}분 후 실행 예정`);
+        nodeLog(`📥 예약 요청 수신 (id=${logEntry.id}, bookingDate=${bookingDate}, type=${type}) → ${delayMs / 60000}분 후 실행 예정`);
+
         res.sendStatus(200);
 
         setTimeout(() => handleReservationRetry(logEntry), delayMs);
