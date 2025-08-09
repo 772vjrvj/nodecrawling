@@ -13,7 +13,7 @@ let app = null; try { ({ app } = require('electron')); } catch { app = null; }
 // ───────────────────────────────────────────────────────────────────────────────
 // Watcher 실행 관련 상태 + 큐
 // ───────────────────────────────────────────────────────────────────────────────
-let watcherProcess = null;                // 현재 실행 중인 파이썬 watcher 프로세스 참조
+let watcherProcess = null;                // 현재 실행 중인 파이썬/EXE watcher 프로세스 참조
 const restoreQueue = [];                  // { exe, pid, resolve, reject }
 let processingQueue = false;              // 큐 처리 루프 동작 여부
 
@@ -87,32 +87,104 @@ async function runWithTimeout(promise, ms) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
+// (추가) 예약 페이지 안정화 유틸
+// ───────────────────────────────────────────────────────────────────────────────
+async function waitBookingReady(p) {
+    await p.bringToFront();
+    await p.waitForFunction(() => document.readyState === 'complete', { timeout: 20_000 });
+    // 예약 UI 핵심 요소 존재 확인 (사이트 상황에 맞춰 key selector 사용)
+    await p.waitForSelector('.dhx_cal_nav_button', { visible: true, timeout: 20_000 });
+}
+
+async function safeEvaluate(p, fn, args = [], retries = 2) {
+    for (let i = 0; i <= retries; i++) {
+        try {
+            return await p.evaluate(fn, ...args);
+        } catch (e) {
+            const msg = String(e && e.message || e);
+            if (/Execution context was destroyed|Cannot find context/i.test(msg) && i < retries) {
+                nodeLog('♻️ evaluate 컨텍스트 복구 재시도');
+                await waitBookingReady(p);
+                continue;
+            }
+            throw e;
+        }
+    }
+    throw new Error('safeEvaluate: retries exhausted');
+}
+
+async function ensureCalendarOpen(p) {
+    await waitBookingReady(p);
+
+    const openSelector = '.vfc-container';               // 실제 달력 루트 셀렉터로 조정
+    const triggerSelector = '.btn_clander, .open-calendar-btn'; // 열기 버튼 셀렉터 조정
+
+    if (await p.$(openSelector)) {
+        nodeLog('✅ 달력 이미 열려 있음');
+        return;
+    }
+
+    await p.waitForSelector(triggerSelector, { visible: true, timeout: 10_000 });
+    await p.click(triggerSelector, { delay: 30 });
+
+    try {
+        await p.waitForSelector(openSelector, { visible: true, timeout: 5_000 });
+        nodeLog('✅ 달력 열림 확인(1차)');
+        return;
+    } catch {}
+
+    await p.keyboard.press('Escape').catch(() => {});
+    await p.waitForTimeout(200);
+    await p.click(triggerSelector, { delay: 30 });
+    await p.waitForSelector(openSelector, { visible: true, timeout: 8_000 });
+    nodeLog('✅ 달력 열림 확인(2차)');
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
 /** 내부: watcher 1회 실행 로직
- *  - PID 기준 단발 검사(--single-check) → 종료
- *  - PID 윈도우가 없으면 code 101로 종료 → 전체 Chrome 대상으로 1회 fallback
+ *  - EXE와 PY 스크립트의 인자 호환 문제 해결
+ *  - EXE: '--restore-once', '--pid'만 사용 (추가 플래그 미지원)
+ *  - PY : '--single-check' 등 확장 인자 허용
  */
 // ───────────────────────────────────────────────────────────────────────────────
 async function runWatcherOnce(exe, chromePid) {
     // 이전 watcher가 살아있다면 "진짜 종료"까지 기다렸다가 새로 실행
     await ensureStopped(watcherProcess);
 
-    const args = [
-        '--pid', String(chromePid),
-        '--single-check',
-        '--exit-if-not-found',
-        '--timeout', '6',
-    ];
+    const isExe = exe.toLowerCase().endsWith('.exe');
+    let cmd = exe, args = [];
 
-    watcherProcess = spawn(exe, args, { windowsHide: true });
+    if (isExe) {
+        // ★ EXE는 최소 인자만 (당신 로그 기준으로 미지원 플래그 제거)
+        args = [];
+        if (chromePid) { args.push('--pid', String(chromePid)); }
+        args.push('--restore-once'); // 1회 복원
+    } else {
+        // ★ PY 스크립트는 확장 인자 허용
+        cmd = process.env.PYTHON || 'python';
+        args = [exe];
+        if (chromePid) { args.push('--pid', String(chromePid)); }
+        args.push('--single-check', '--exit-if-not-found', '--timeout', '6', '--restore-once');
+    }
+
+    watcherProcess = spawn(cmd, args, { windowsHide: true });
     watcherProcess.stdout.on('data', d => nodeLog('[PYTHON]', String(d).trim()));
     watcherProcess.stderr.on('data', d => nodeError('[PYTHON ERROR]', String(d).trim()));
 
     const { code } = await onceExit(watcherProcess, 8000);
     watcherProcess = null;
 
-    // PID 매칭 실패(code 101) → 전체 Chrome 대상으로 짧게 한 번 더
+    // PID 매칭 실패(code 101) → 전체 Chrome 대상으로 짧게 한 번 더 (가능한 경우만)
     if (code === 101) {
-        const fb = spawn(exe, ['--single-check', '--timeout', '5'], { windowsHide: true });
+        const fbIsExe = isExe;
+        let fbCmd = exe, fbArgs = [];
+        if (fbIsExe) {
+            fbArgs = ['--restore-once'];
+        } else {
+            fbCmd = process.env.PYTHON || 'python';
+            fbArgs = [exe, '--single-check', '--timeout', '5', '--restore-once'];
+        }
+        const fb = spawn(fbCmd, fbArgs, { windowsHide: true });
         fb.stdout.on('data', d => nodeLog('[PYTHON-FB]', String(d).trim()));
         fb.stderr.on('data', d => nodeError('[PYTHON-FB ERROR]', String(d).trim()));
         await onceExit(fb, 6000);
@@ -178,6 +250,7 @@ async function initBrowser(chromePath) {
             headless: false,
             executablePath: chromePath,
             defaultViewport: null,
+            protocolTimeout: 180_000, // ★ Runtime.callFunctionOn 타임아웃 완화
             args: [
                 '--window-size=800,300',
                 '--window-position=0,800',
@@ -202,6 +275,10 @@ async function initBrowser(chromePath) {
         const pages = await browser.pages();
         page = pages.length ? pages[0] : await browser.newPage();
         if (!page) throw new Error('❌ 페이지 생성 실패');
+
+        // 기본 타임아웃 상향
+        page.setDefaultTimeout(30_000);
+        page.setDefaultNavigationTimeout(60_000);
 
         nodeLog('📄 페이지 객체 획득 완료');
         mainPage = page;
@@ -232,13 +309,13 @@ async function login({ userId, password, token, chromePath }) {
         }
 
         nodeLog('🌐 로그인 페이지 접속 시도');
-        await page.goto('https://gpm.golfzonpark.com', { waitUntil: 'networkidle2', timeout: 60000 });
+        await page.goto('https://gpm.golfzonpark.com', { waitUntil: 'networkidle2', timeout: 60_000 });
 
         // 입력
-        await page.waitForSelector('#user_id', { timeout: 10000 });
+        await page.waitForSelector('#user_id', { timeout: 10_000 });
         await page.type('#user_id', userId, { delay: 50 });
 
-        await page.waitForSelector('#user_pw', { timeout: 10000 });
+        await page.waitForSelector('#user_pw', { timeout: 10_000 });
         await page.type('#user_pw', password, { delay: 50 });
 
         // 제출 및 네비게이션 동시대기
@@ -263,6 +340,10 @@ async function login({ userId, password, token, chromePath }) {
                     hookConnected = true;
                     nodeLog('🔌 Request hook connected (in login)');
 
+                    // 기본 타임아웃
+                    newPage.setDefaultTimeout(30_000);
+                    newPage.setDefaultNavigationTimeout(60_000);
+
                     reservationPage = newPage;
                     resolve(newPage);
                 } catch (error) {
@@ -273,7 +354,7 @@ async function login({ userId, password, token, chromePath }) {
 
         // 예약 버튼 클릭 → 새 탭 생성
         nodeLog('📆 예약 버튼 클릭 시도');
-        await page.waitForSelector('button.booking__btn', { timeout: 10000 });
+        await page.waitForSelector('button.booking__btn', { timeout: 10_000 });
         await page.click('button.booking__btn');
 
         const newPage = await newPagePromise;
@@ -283,21 +364,25 @@ async function login({ userId, password, token, chromePath }) {
 
         await newPage.bringToFront();
 
-        // 예약 UI 로딩 확인
+        // 예약 UI 로딩 확인 + 안정화
         await newPage
-            .waitForSelector('.dhx_cal_container.dhx_scheduler_list', { timeout: 30000 })
+            .waitForSelector('.dhx_cal_container.dhx_scheduler_list', { timeout: 30_000 })
             .then(() => nodeLog('✅ 예약 페이지 로딩 완료'))
             .catch(() => nodeLog('⚠️ 예약 페이지 UI 로딩 실패: .dhx_cal_container.dhx_scheduler_list'));
 
         nodeLog('🟢 예약 페이지 접근됨:', newPage.url());
+
+        // 첫 상호작용 안정화
+        await waitBookingReady(newPage);
+        try { await ensureCalendarOpen(newPage); } catch (e) { nodeError('달력 열기 실패(무시 가능):', e.message); }
 
         // 후킹 실패 시 대비
         setTimeout(async () => {
             if (!hookConnected) {
                 try {
                     const pages = await _browser.pages();
-                    const fallbackPage = pages.find(p => p.url().includes('reservation') && !p.isClosed());
-                    if (fallbackPage) {
+                    const fallbackPage = pages.find(p => p.url().includes('reservation') || p.url().includes('/ui/booking'));
+                    if (fallbackPage && !fallbackPage.isClosed()) {
                         attachRequestHooks(fallbackPage);
                         nodeLog('🔁 fallback hook connected (reservation page)');
                         reservationPage = fallbackPage;
@@ -328,6 +413,9 @@ async function findReservationTab() {
         const exists = await reservationPage.$('.dhx_cal_nav_button');
         if (exists) {
             nodeLog('✅ 예약 탭(보관 참조) 찾음:', reservationPage.url());
+            // 첫 상호작용 안정화
+            try { await waitBookingReady(reservationPage); } catch (e) {}
+            try { await ensureCalendarOpen(reservationPage); } catch (e) {}
             return reservationPage;
         }
     }
@@ -342,6 +430,9 @@ async function findReservationTab() {
             if (exists) {
                 nodeLog('✅ 예약 탭 찾음:', url);
                 reservationPage = p;
+                // 안정화
+                try { await waitBookingReady(reservationPage); } catch (e) {}
+                try { await ensureCalendarOpen(reservationPage); } catch (e) {}
                 return p;
             }
         }

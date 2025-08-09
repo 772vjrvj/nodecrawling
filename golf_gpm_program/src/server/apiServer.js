@@ -3,17 +3,15 @@ const express = require('express');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { findReservationTab } = require('../services/puppeteer');
+const { findReservationTab } = require('../services/puppeteer'); // 안정화 포함됨
 let app = null;
-try {
-    app = require('electron').app;
-} catch (e) {
-    app = null;
-}
+try { app = require('electron').app; } catch { app = null; }
 
 let serverInstance = null;
 
-
+// ─────────────────────────────────────────────────────────
+// 로그 파일 경로
+// ─────────────────────────────────────────────────────────
 function getReservationLogPath() {
     const file = 'reservation-log.json';
 
@@ -44,25 +42,24 @@ function getReservationLogPath() {
 }
 
 // ─────────────────────────────────────────────────────────
-// 유틸: 현재 시간 포맷
+// 시간/ID 유틸
 // ─────────────────────────────────────────────────────────
 function getNow() {
     const now = new Date();
-    const pad = (n, width = 2) => n.toString().padStart(width, '0');
+    const pad = (n, w = 2) => n.toString().padStart(w, '0');
     return `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${pad(now.getMilliseconds(), 3)}`;
 }
 
-// ─────────────────────────────────────────────────────────
-// 유틸: 예약 날짜 문자열 → 년/월로 파싱
-// ─────────────────────────────────────────────────────────
-function parseBookingDate(bookingDate) {
-    const year = parseInt(bookingDate.slice(0, 4), 10);
-    const month = parseInt(bookingDate.slice(4, 6), 10);
-    return { targetYear: year, targetMonth: month };
+let lastTime = '';
+let counter = 0;
+function generateId() {
+    const now = getNow();
+    if (now !== lastTime) { counter = 0; lastTime = now; }
+    return `${now}-${counter++}`;
 }
 
 // ─────────────────────────────────────────────────────────
-// 로그 기록 (JSON 파일에 append)
+// 파일 로그 append/업데이트
 // ─────────────────────────────────────────────────────────
 function writeLog(entry) {
     const logPath = getReservationLogPath();
@@ -79,7 +76,6 @@ function writeLog(entry) {
             data = [];
         }
     }
-
     data.push(entry);
     try {
         fs.writeFileSync(logPath, JSON.stringify(data, null, 2), 'utf-8');
@@ -89,8 +85,86 @@ function writeLog(entry) {
     }
 }
 
+function updateLog(entry) {
+    const logPath = getReservationLogPath();
+    try {
+        const raw = fs.readFileSync(logPath, 'utf-8');
+        const data = raw.trim() ? JSON.parse(raw) : [];
+        const idx = data.findIndex(e => e.id === entry.id);
+        if (idx !== -1) {
+            data[idx] = entry;
+            fs.writeFileSync(logPath, JSON.stringify(data, null, 2), 'utf-8');
+            nodeLog(`📌 로그 결과 갱신 완료 :\n${JSON.stringify(entry, null, 2)}`);
+        }
+    } catch (e) {
+        nodeError('❌ 로그 갱신 실패:', e.message);
+    }
+}
+
 // ─────────────────────────────────────────────────────────
-// 예약 처리 재시도 (1건)
+// 예약 날짜 파싱
+// ─────────────────────────────────────────────────────────
+function parseBookingDate(bookingDate) {
+    const year = parseInt(bookingDate.slice(0, 4), 10);
+    const month = parseInt(bookingDate.slice(4, 6), 10);
+    const day = parseInt(bookingDate.slice(6, 8), 10);
+    return { targetYear: year, targetMonth: month, targetDay: day };
+}
+
+// ─────────────────────────────────────────────────────────
+// (중요) 첫 요청 안정화: 예약 탭 준비/달력 열기
+//  - puppeteer.findReservationTab()가 1차 안정화하나,
+//    SPA 타이밍 문제 대비하여 서버단에서도 한 번 더 보강
+// ─────────────────────────────────────────────────────────
+async function ensureBookingReady(page) {
+    await page.bringToFront();
+    await page.waitForFunction(() => document.readyState === 'complete', { timeout: 20_000 });
+    await page.waitForSelector('.dhx_cal_nav_button', { visible: true, timeout: 20_000 });
+
+    // 달력 열림 확인
+    const calendarOpen = await page.$('.vfc-main-container');
+    if (!calendarOpen) {
+        nodeLog('📅 달력 닫힘 상태 → 열기 시도');
+        try {
+            await page.waitForSelector('.btn_clander', { timeout: 8_000 });
+            await page.click('.btn_clander', { delay: 30 });
+            await page.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
+        } catch {
+            // ESC 후 재시도
+            await page.keyboard.press('Escape').catch(() => {});
+            await page.waitForTimeout(200);
+            await page.click('.btn_clander', { delay: 30 });
+            await page.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
+        }
+        nodeLog('✅ 달력 열림 확인');
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// (선택) 직렬 큐로 동시 처리 방지
+// ─────────────────────────────────────────────────────────
+const q = [];
+let qRunning = false;
+function enqueue(job) {
+    q.push(job);
+    if (!qRunning) drain();
+}
+async function drain() {
+    qRunning = true;
+    try {
+        while (q.length) {
+            const job = q.shift();
+            await job().catch(e => nodeError('❌ 큐 작업 실패:', e.message));
+        }
+    } finally {
+        qRunning = false;
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// 예약 처리 (단건)
+//  - reload 제거 (첫 요청 컨텍스트 파괴 방지)
+//  - 준비/달력 열기 보강
 // ─────────────────────────────────────────────────────────
 async function handleReservationRetry(logEntry) {
     const { bookingDate, retryCnt } = logEntry;
@@ -98,26 +172,9 @@ async function handleReservationRetry(logEntry) {
     if (retryCnt > 5) {
         logEntry.result = 'stop';
         logEntry.error = 'retry limit exceeded';
-
         nodeLog(`⚠️ 예약 재시도 중단 (id=${logEntry.id}) → retryCnt=${retryCnt} > 5`);
-        nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
-
-        // 로그 파일 업데이트
-        try {
-            const logPath = getReservationLogPath();
-            const raw = fs.readFileSync(logPath, 'utf-8');
-            const data = raw.trim() ? JSON.parse(raw) : [];
-            const idx = data.findIndex(e => e.id === logEntry.id);
-            if (idx !== -1) {
-                data[idx] = logEntry;
-                fs.writeFileSync(logPath, JSON.stringify(data, null, 2), 'utf-8');
-                nodeLog('📌 로그 결과 갱신 완료 (중단)');
-            }
-        } catch (e) {
-            nodeError('❌ [중단] 로그 갱신 실패:', e.message);
-        }
-
-        return; // 조기 종료
+        updateLog({ ...logEntry, endDate: getNow() });
+        return;
     }
 
     nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
@@ -126,49 +183,44 @@ async function handleReservationRetry(logEntry) {
         const page = await findReservationTab();
         nodeLog('✅ 예약 탭 페이지 확보 완료');
 
-        await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
-        nodeLog('🔄 페이지 새로고침 완료');
+        // 🔸 reload는 제거 (초기 SPA 리렌더 타이밍과 충돌로 컨텍스트 파괴 유발)
+        // await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
 
-        nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
+        // 페이지 안정화 및 달력 열기
+        await ensureBookingReady(page);
 
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        nodeLog('3초 대기 완료');
+        // 약간의 여유
+        await new Promise(r => setTimeout(r, 800));
+        nodeLog('⏳ 안정화 대기 완료');
 
-        const { targetYear, targetMonth } = parseBookingDate(bookingDate);
-        const calendarExists = await page.$('.vfc-main-container');
+        const { targetYear, targetMonth, targetDay } = parseBookingDate(bookingDate);
 
-        if (!calendarExists) {
-            nodeLog('📅 달력 닫힘 상태 → 열기 시도');
-            await page.waitForSelector('.btn_clander', { timeout: 1500 });
-            await page.click('.btn_clander');
-            nodeLog('🖱️ 달력 열기 버튼 클릭 완료');
-        }
-
-        await page.waitForSelector('.vfc-top-date.vfc-center', { timeout: 5000 });
-
+        // 현재 달/년 읽기
+        await page.waitForSelector('.vfc-top-date.vfc-center', { timeout: 10_000 });
         const { currentYear, currentMonth } = await page.evaluate(() => {
-            const elements = document.querySelectorAll('.vfc-top-date.vfc-center a');
+            const els = document.querySelectorAll('.vfc-top-date.vfc-center a');
             return {
-                currentMonth: parseInt(elements[0]?.textContent.trim().replace('월', '')),
-                currentYear: parseInt(elements[1]?.textContent.trim())
+                currentMonth: parseInt(els[0]?.textContent.trim().replace('월', '')),
+                currentYear: parseInt(els[1]?.textContent.trim())
             };
         });
-
         nodeLog(`📆 현재 달력 위치: ${currentYear}년 ${currentMonth}월 / 목표: ${targetYear}년 ${targetMonth}월`);
 
+        // 월 이동
         const diffMonth = (targetYear - currentYear) * 12 + (targetMonth - currentMonth);
-        const direction = diffMonth > 0 ? 'right' : 'left';
-        const clicks = Math.abs(diffMonth);
-        const selector = direction === 'right' ? '.vfc-arrow-right' : '.vfc-arrow-left';
-
-        for (let i = 0; i < clicks; i++) {
-            await page.waitForSelector(selector, { timeout: 3000 });
-            await page.click(selector);
-            await new Promise(resolve => setTimeout(resolve, 500));
+        if (diffMonth !== 0) {
+            const direction = diffMonth > 0 ? 'right' : 'left';
+            const clicks = Math.abs(diffMonth);
+            const selector = direction === 'right' ? '.vfc-arrow-right' : '.vfc-arrow-left';
+            for (let i = 0; i < clicks; i++) {
+                await page.waitForSelector(selector, { timeout: 5_000 });
+                await page.click(selector);
+                await page.waitForTimeout(350);
+            }
+            nodeLog(`↔️ 달력 ${direction} 방향으로 ${clicks}회 이동 완료`);
         }
-        nodeLog(`↔️ 달력 ${direction} 방향으로 ${clicks}회 이동 완료`);
 
-        const targetDay = parseInt(bookingDate.slice(6, 8));
+        // 날짜 클릭
         const clicked = await page.evaluate((day) => {
             const weeks = document.querySelectorAll('.vfc-week');
             for (const week of weeks) {
@@ -195,30 +247,17 @@ async function handleReservationRetry(logEntry) {
         }
 
     } catch (err) {
-        nodeError('❌ 예약 처리 중 예외 meg:', err.message);
-        nodeError('❌ 예약 처리 중 예외 id :', logEntry.id);
+        nodeError('❌ 예약 처리 중 예외:', err.message);
         logEntry.result = 'fail';
         logEntry.error = err.message;
     } finally {
-        const logPath = getReservationLogPath();
-        try {
-            const raw = fs.readFileSync(logPath, 'utf-8');
-            const data = raw.trim() ? JSON.parse(raw) : [];
-            const idx = data.findIndex(e => e.id === logEntry.id);
-            if (idx !== -1) {
-                logEntry.endDate = getNow();
-                data[idx] = logEntry;
-                fs.writeFileSync(logPath, JSON.stringify(data, null, 2), 'utf-8');
-                nodeLog(`📌 로그 결과 갱신 완료 :\n${JSON.stringify(logEntry, null, 2)}`);
-            }
-        } catch (e) {
-            nodeError('❌ [재시도] 로그 갱신 실패 msg:', e.message);
-            nodeError('❌ [재시도] 로그 갱신 실패 id:', logEntry.id);
-        }
+        updateLog({ ...logEntry, endDate: getNow() });
     }
 }
 
-
+// ─────────────────────────────────────────────────────────
+// 실패 로그 재시도 스케줄러
+// ─────────────────────────────────────────────────────────
 function retryFailedReservations() {
     const logPath = getReservationLogPath();
     if (!fs.existsSync(logPath)) return;
@@ -245,43 +284,31 @@ function retryFailedReservations() {
     nodeLog(`🔁 실패한 예약 ${failEntries.length}건 재시도 시작`);
 
     failEntries.forEach((entry, idx) => {
-        entry.retryCnt++; // ✅ retryCnt 1 증가
-
+        entry.retryCnt++;
         nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, bookingDate=${entry.bookingDate}, retryCnt=${entry.retryCnt})`);
-
-        setTimeout(() => {
-            handleReservationRetry(entry);
-        }, 5000 * idx);
+        // 직렬 큐로 순차 실행
+        enqueue(() => new Promise(res => setTimeout(res, 5000 * idx)).then(() => handleReservationRetry(entry)));
     });
 }
 
-let lastTime = '';
-let counter = 0;
-
-function generateId() {
-    const now = getNow();
-    if (now !== lastTime) {
-        counter = 0;
-        lastTime = now;
-    }
-    return `${now}-${counter++}`;
-}
-
+// ─────────────────────────────────────────────────────────
+// 서버 시작/종료
+// ─────────────────────────────────────────────────────────
 async function startApiServer(port = 32123) {
-    await stopApiServer(); // ✅ 안전하게 기다린 후
+    await stopApiServer();
 
     const expressApp = express();
 
+    // 요청: /reseration?bookingDate=yyyymmddhhmmss&type=m|t
     expressApp.get('/reseration', async (req, res) => {
         const { bookingDate, type } = req.query;
-
         if (!bookingDate) return res.status(400).json({ message: 'bookingDate required' });
 
         const delayMs = type === 'm' ? 1000 * 60 * 5 : 1000 * 60;
         const logEntry = {
             id: generateId(),
-            bookingDate: bookingDate,
-            type: type,
+            bookingDate,
+            type,
             channel: type === 'm' ? '모바일' : '전화',
             requestDate: getNow(),
             endDate: '',
@@ -291,11 +318,15 @@ async function startApiServer(port = 32123) {
         };
 
         nodeLog(`📥 예약 요청 수신 (id=${logEntry.id}, bookingDate=${bookingDate}, type=${type}) → ${delayMs / 60000}분 후 실행 예정`);
-
         res.sendStatus(200);
 
-        setTimeout(() => handleReservationRetry(logEntry), delayMs);
         writeLog(logEntry);
+
+        // 직렬 큐에 예약: 지연 후 단건 처리
+        enqueue(async () => {
+            await new Promise(r => setTimeout(r, delayMs));
+            await handleReservationRetry(logEntry);
+        });
     });
 
     serverInstance = http.createServer(expressApp);
@@ -303,6 +334,7 @@ async function startApiServer(port = 32123) {
         nodeLog(`🌐 API 서버 실행 중: http://localhost:${port}/reseration`);
     });
 
+    // 10분마다 실패 재시도
     setInterval(retryFailedReservations, 1000 * 60 * 10);
 }
 
@@ -320,7 +352,4 @@ function stopApiServer() {
     });
 }
 
-module.exports = {
-    startApiServer,
-    stopApiServer
-};
+module.exports = { startApiServer, stopApiServer };
