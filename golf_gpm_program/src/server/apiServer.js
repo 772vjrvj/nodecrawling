@@ -195,7 +195,8 @@ async function handleReservationRetry(logEntry) {
         }
 
     } catch (err) {
-        nodeError('❌ 예약 처리 중 예외:', err.message);
+        nodeError('❌ 예약 처리 중 예외 meg:', err.message);
+        nodeError('❌ 예약 처리 중 예외 id :', logEntry.id);
         logEntry.result = 'fail';
         logEntry.error = err.message;
     } finally {
@@ -205,12 +206,14 @@ async function handleReservationRetry(logEntry) {
             const data = raw.trim() ? JSON.parse(raw) : [];
             const idx = data.findIndex(e => e.id === logEntry.id);
             if (idx !== -1) {
+                logEntry.endDate = getNow();
                 data[idx] = logEntry;
                 fs.writeFileSync(logPath, JSON.stringify(data, null, 2), 'utf-8');
-                nodeLog('📌 로그 결과 갱신 완료:', logEntry.result);
+                nodeLog(`📌 로그 결과 갱신 완료 :\n${JSON.stringify(logEntry, null, 2)}`);
             }
         } catch (e) {
-            nodeError('❌ [재시도] 로그 갱신 실패:', e.message);
+            nodeError('❌ [재시도] 로그 갱신 실패 msg:', e.message);
+            nodeError('❌ [재시도] 로그 갱신 실패 id:', logEntry.id);
         }
     }
 }
@@ -244,7 +247,7 @@ function retryFailedReservations() {
     failEntries.forEach((entry, idx) => {
         entry.retryCnt++; // ✅ retryCnt 1 증가
 
-        nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, id=${entry.bookingDate}, retryCnt=${entry.retryCnt})`);
+        nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, bookingDate=${entry.bookingDate}, retryCnt=${entry.retryCnt})`);
 
         setTimeout(() => {
             handleReservationRetry(entry);
@@ -267,9 +270,9 @@ function generateId() {
 async function startApiServer(port = 32123) {
     await stopApiServer(); // ✅ 안전하게 기다린 후
 
-    const app = express();
+    const expressApp = express();
 
-    app.get('/reseration', async (req, res) => {
+    expressApp.get('/reseration', async (req, res) => {
         const { bookingDate, type } = req.query;
 
         if (!bookingDate) return res.status(400).json({ message: 'bookingDate required' });
@@ -281,6 +284,7 @@ async function startApiServer(port = 32123) {
             type: type,
             channel: type === 'm' ? '모바일' : '전화',
             requestDate: getNow(),
+            endDate: '',
             result: 'pending',
             error: null,
             retryCnt: 0,
@@ -294,7 +298,7 @@ async function startApiServer(port = 32123) {
         writeLog(logEntry);
     });
 
-    serverInstance = http.createServer(app);
+    serverInstance = http.createServer(expressApp);
     serverInstance.listen(port, () => {
         nodeLog(`🌐 API 서버 실행 중: http://localhost:${port}/reseration`);
     });

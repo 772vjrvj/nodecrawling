@@ -2,17 +2,24 @@
 
 const puppeteer = require('puppeteer');
 const { attachRequestHooks } = require('../handlers/router');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { BrowserWindow } = require('electron');
-
 
 // Optional Electron deps + path/fs (빌드/개발 모두에서 안전하게 경로 계산)
 const path = require('path');
 const fs = require('fs');
 let app = null; try { ({ app } = require('electron')); } catch { app = null; }
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Watcher 실행 관련 상태 + 큐
+// ───────────────────────────────────────────────────────────────────────────────
+let watcherProcess = null;                // 현재 실행 중인 파이썬 watcher 프로세스 참조
+const restoreQueue = [];                  // { exe, pid, resolve, reject }
+let processingQueue = false;              // 큐 처리 루프 동작 여부
 
-let watcherProcess = null;
+// 안전장치
+const MAX_RESTORE_QUEUE = 20;             // 큐 길이 상한(폭주 방지)
+const RUN_TIMEOUT_MS = 15_000;            // 각 watcher 실행 타임아웃
 
 // 내부 상태
 let browser = null;
@@ -22,8 +29,129 @@ let page = null;
 let mainPage = null;        // 로그인/메인 탭
 let reservationPage = null; // 예약 탭
 
+// ───────────────────────────────────────────────────────────────────────────────
+// 유틸: child process 종료 이벤트를 Promise로 대기
+//  - kill()은 "종료 요청"일 뿐 → 실제 종료(close/exit)까지 기다려야 안전
+// ───────────────────────────────────────────────────────────────────────────────
+function onceExit(child, timeoutMs = 1500) {
+    return new Promise((resolve, reject) => {
+        let done = false;
+        const finish = (code, signal) => { if (!done) { done = true; resolve({ code, signal }); } };
+        child.once('close', finish);
+        child.once('exit',  finish);
+        child.once('error', err => { if (!done) { done = true; reject(err); } });
+        if (timeoutMs > 0) {
+            setTimeout(() => { if (!done) { done = true; resolve({ code: null, signal: 'timeout' }); } }, timeoutMs);
+        }
+    });
+}
 
+// ───────────────────────────────────────────────────────────────────────────────
+/** 유틸: 안전 종료
+ *  - 1차: proc.kill() 후 종료 대기
+ *  - 2차: 타임아웃이면 강제 종료(taskkill / SIGKILL)
+ */
+// ───────────────────────────────────────────────────────────────────────────────
+async function ensureStopped(proc) {
+    if (!proc || proc.killed) return;
+    try {
+        proc.kill(); // 정상 종료 요청
+        const r1 = await onceExit(proc, 1200);
+        if (r1.signal !== 'timeout') return; // 제때 종료되면 OK
+
+        // 타임아웃 → 강제 종료
+        if (process.platform === 'win32') {
+            await new Promise(res => execFile('taskkill', ['/PID', String(proc.pid), '/T', '/F'], () => res()));
+        } else {
+            try { proc.kill('SIGKILL'); } catch {}
+        }
+        await onceExit(proc, 1200);
+    } catch {
+        // 조용히 무시
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// 유틸: Promise 타임아웃 래퍼(희귀한 행 끊기)
+// ───────────────────────────────────────────────────────────────────────────────
+async function runWithTimeout(promise, ms) {
+    let t;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((_, rej) => (t = setTimeout(() => rej(new Error('restore timeout')), ms)))
+        ]);
+    } finally {
+        clearTimeout(t);
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+/** 내부: watcher 1회 실행 로직
+ *  - PID 기준 단발 검사(--single-check) → 종료
+ *  - PID 윈도우가 없으면 code 101로 종료 → 전체 Chrome 대상으로 1회 fallback
+ */
+// ───────────────────────────────────────────────────────────────────────────────
+async function runWatcherOnce(exe, chromePid) {
+    // 이전 watcher가 살아있다면 "진짜 종료"까지 기다렸다가 새로 실행
+    await ensureStopped(watcherProcess);
+
+    const args = [
+        '--pid', String(chromePid),
+        '--single-check',
+        '--exit-if-not-found',
+        '--timeout', '6',
+    ];
+
+    watcherProcess = spawn(exe, args, { windowsHide: true });
+    watcherProcess.stdout.on('data', d => nodeLog('[PYTHON]', String(d).trim()));
+    watcherProcess.stderr.on('data', d => nodeError('[PYTHON ERROR]', String(d).trim()));
+
+    const { code } = await onceExit(watcherProcess, 8000);
+    watcherProcess = null;
+
+    // PID 매칭 실패(code 101) → 전체 Chrome 대상으로 짧게 한 번 더
+    if (code === 101) {
+        const fb = spawn(exe, ['--single-check', '--timeout', '5'], { windowsHide: true });
+        fb.stdout.on('data', d => nodeLog('[PYTHON-FB]', String(d).trim()));
+        fb.stderr.on('data', d => nodeError('[PYTHON-FB ERROR]', String(d).trim()));
+        await onceExit(fb, 6000);
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+/** 큐 처리 루프
+ *  - restoreQueue에 쌓인 요청을 FIFO로 하나씩 실행
+ *  - 각 요청은 runWatcherOnce(exe,pid) 완료 시 resolve/reject 호출
+ *  - 각 실행에 타임아웃 가드 적용
+ */
+// ───────────────────────────────────────────────────────────────────────────────
+async function drainRestoreQueue() {
+    if (processingQueue) return;
+    processingQueue = true;
+    try {
+        while (restoreQueue.length) {
+            const job = restoreQueue.shift();
+            const { exe, pid, resolve, reject } = job;
+            try {
+                await runWithTimeout(runWatcherOnce(exe, pid), RUN_TIMEOUT_MS);
+                resolve(); // 해당 요청 완료
+            } catch (err) {
+                reject(err);
+            }
+        }
+    } finally {
+        processingQueue = false;
+        if (restoreQueue.length) {
+            // 에러는 로그만 남기고 누수 없이 재시작
+            drainRestoreQueue().catch(err => nodeError('drainRestoreQueue error:', err?.message || err));
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
 // 브라우저 초기화
+// ───────────────────────────────────────────────────────────────────────────────
 async function initBrowser(chromePath) {
     // 기존 브라우저 완전 종료
     if (browser) {
@@ -51,7 +179,6 @@ async function initBrowser(chromePath) {
             executablePath: chromePath,
             defaultViewport: null,
             args: [
-                // '--window-size=1200,1000',
                 '--window-size=800,300',
                 '--window-position=0,800',
                 '--disable-infobars',
@@ -88,8 +215,9 @@ async function initBrowser(chromePath) {
     }
 }
 
-
+// ───────────────────────────────────────────────────────────────────────────────
 // 로그인 & 예약 페이지 진입
+// ───────────────────────────────────────────────────────────────────────────────
 async function login({ userId, password, token, chromePath }) {
     try {
         const result = await initBrowser(chromePath);
@@ -163,7 +291,6 @@ async function login({ userId, password, token, chromePath }) {
 
         nodeLog('🟢 예약 페이지 접근됨:', newPage.url());
 
-
         // 후킹 실패 시 대비
         setTimeout(async () => {
             if (!hookConnected) {
@@ -188,10 +315,11 @@ async function login({ userId, password, token, chromePath }) {
     }
 }
 
-
+// ───────────────────────────────────────────────────────────────────────────────
 // 예약 탭 찾기
+// ───────────────────────────────────────────────────────────────────────────────
 async function findReservationTab() {
-    await restoreChromeIfMinimized(); // 최소화 상태면 복원 시도
+    await restoreChromeIfMinimized(); // 최소화 상태면 복원 시도(큐에 들어가 순차 실행)
 
     if (!browser) throw new Error('브라우저가 실행되지 않았습니다.');
 
@@ -222,13 +350,11 @@ async function findReservationTab() {
     throw new Error('❌ 예약 탭을 찾을 수 없습니다.');
 }
 
-
-
 let authInterval = null;
 
+// ───────────────────────────────────────────────────────────────────────────────
 // 인증 만료 감시
-// https://gpmui.golfzonpark.com/fc/error
-// puppeteer 쪽 (예: services/puppeteer.js 내부)
+// ───────────────────────────────────────────────────────────────────────────────
 async function watchForAuthExpiration(mainPageParam) {
     if (authInterval) return; // ✅ 중복 감지 방지
 
@@ -283,38 +409,47 @@ async function watchForAuthExpiration(mainPageParam) {
     authInterval = setInterval(checkLoop, CHECK_INTERVAL);
 }
 
+// ───────────────────────────────────────────────────────────────────────────────
 // 현재 페이지 반환 (우선순위: 예약 → 메인 → 기본)
+// ───────────────────────────────────────────────────────────────────────────────
 function getPage() {
     if (reservationPage && !reservationPage.isClosed()) return reservationPage;
     if (mainPage && !mainPage.isClosed()) return mainPage;
     return page;
 }
 
-// Chrome 최소화 복원 (Python watcher 실행)
+// ───────────────────────────────────────────────────────────────────────────────
+/** Chrome 최소화 복원 (Python watcher 실행)
+ *  - 동시/연속 요청을 **모두 처리**하되, 큐에 저장하여 **겹치지 않게 순차 실행**
+ *  - 각 호출은 자신의 작업이 완료될 때 resolve되는 Promise를 반환
+ *  - 큐 길이 상한을 넘으면 에러로 빠르게 거절(폭주 방지)
+ */
+// ───────────────────────────────────────────────────────────────────────────────
 async function restoreChromeIfMinimized() {
-    try {
-        if (!browser || !browser.process || !browser.process()) {
-            nodeLog('restoreChromeIfMinimized: 브라우저 프로세스 없음');
-            return;
-        }
-
-        const chromePid = browser.process().pid;
-        const exe = getWatcherExePath(); // 새로 만든 EXE 경로 함수
-        nodeLog('[watcher exe 실행]', exe);
-
-        watcherProcess = spawn(exe, ['--restore-once', '--pid', String(chromePid)]);
-
-        watcherProcess.stdout.on('data', data => nodeLog('[PYTHON]', data.toString().trim()));
-        watcherProcess.stderr.on('data', data => nodeError('[PYTHON ERROR]', data.toString().trim()));
-        watcherProcess.on('close', code => nodeLog(`[PYTHON] watcher 종료 (code: ${code})`));
-
-    } catch (e) {
-        nodeError('⚠️ Chrome 복원 중 오류:', e.message);
+    if (!browser || !browser.process || !browser.process()) {
+        nodeLog('restoreChromeIfMinimized: 브라우저 프로세스 없음');
+        return;
     }
+
+    const exe = getWatcherExePath();
+    const chromePid = browser.process().pid;
+    nodeLog('[watcher exe 요청]', exe);
+
+    // 현재 호출을 큐에 등록하고 Promise 반환
+    return new Promise((resolve, reject) => {
+        if (restoreQueue.length >= MAX_RESTORE_QUEUE) {
+            nodeError(`restoreQueue overflow (${restoreQueue.length})`);
+            return reject(new Error('restore queue overflow'));
+        }
+        restoreQueue.push({ exe, pid: chromePid, resolve, reject });
+        // 큐 처리 루프 킥
+        drainRestoreQueue().catch(err => nodeError('drainRestoreQueue error:', err?.message || err));
+    });
 }
 
-
-//파이썬 실행경로 리턴
+// ───────────────────────────────────────────────────────────────────────────────
+// 파이썬 EXE 실행경로 리턴
+// ───────────────────────────────────────────────────────────────────────────────
 function getWatcherExePath() {
     const file = 'chrome_minimized_watcher.exe';
 
@@ -340,7 +475,10 @@ function getWatcherExePath() {
     throw new Error('[watcher EXE not found]\n' + candidates.join('\n'));
 }
 
-//브라우저 종료
+// ───────────────────────────────────────────────────────────────────────────────
+// 브라우저 종료
+//  - watcherProcess도 함께 정리
+// ───────────────────────────────────────────────────────────────────────────────
 async function shutdownBrowser() {
     if (browser) {
         try {
@@ -365,14 +503,11 @@ async function shutdownBrowser() {
             }
 
             // ✅ watcherProcess 종료
-            if (watcherProcess && !watcherProcess.killed) {
-                watcherProcess.kill('SIGKILL');
-                nodeLog('🧹 watcher 프로세스 종료 완료');
-                watcherProcess = null;
-            }
+            await ensureStopped(watcherProcess);
+            watcherProcess = null;
+            nodeLog('🧹 watcher 프로세스 종료 완료');
         }
     }
 }
-
 
 module.exports = { login, findReservationTab, shutdownBrowser };

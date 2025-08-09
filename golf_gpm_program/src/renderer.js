@@ -179,13 +179,14 @@ async function startAction() {
         return;
     }
 
-    // ✅ 버튼 텍스트 변경 + 비활성화
-    const startBtn = document.querySelector('.info-box button[onclick="startAction()"]');
-    if (startBtn) {
-        startBtn.disabled = true;
-        startBtn.style.backgroundColor = '#aaa';  // 선택: 비활성화 스타일
-        console.log("🔒 시작 버튼 비활성화 완료");
-    }
+    // ✅ 시작 버튼 + 모든 등록 버튼 비활성화
+    const allButtons = document.querySelectorAll('button');
+    allButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.style.backgroundColor = '#aaa';
+        btn.style.cursor = 'not-allowed';
+    });
+    console.log("🔒 모든 버튼 비활성화 완료");
 
     // ✅ 매장 정보 & 토큰 요청
     const result = await window.electronAPI.fetchStoreInfo(storeId);
@@ -208,8 +209,6 @@ async function startAction() {
     window.electronAPI.startCrawl({ userId, password, storeId, chromePath });
 }
 
-
-
 // 크롬 모달 초기화
 function initChromeModal() {
     console.log("🔄 크롬 경로 모달 초기화 시작");
@@ -231,7 +230,6 @@ function initChromeModal() {
     });
 }
 
-
 // 경로 저장
 async function saveChromePath() {
     const chromePath = document.getElementById("chrome-path").value.trim();
@@ -248,7 +246,6 @@ async function saveChromePath() {
     document.getElementById("chrome-info").innerHTML = `● 경로 : ${chromePath}`;
     closeModal('chrome-modal');
 }
-
 
 // 찾아보기 버튼 클릭 시
 async function browseChromePath() {

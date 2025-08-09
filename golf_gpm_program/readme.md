@@ -29,6 +29,10 @@ https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 "version": "0.9.6",
 "buildVersion": "0.9.6.0"
 
+기본 설치경로는 설치 화면에서  , 사용자를 단일 사용자가 아닌 전체 사용자 체크하니
+C\Program 폴더에 설치되네요. 사용자를 지정하니 appdata 폴더에 설치되었어요.
+
+
 
 ■ 매장정보
 
