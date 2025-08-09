@@ -19,7 +19,7 @@ let processingQueue = false;              // 큐 처리 루프 동작 여부
 
 // 안전장치
 const MAX_RESTORE_QUEUE = 20;             // 큐 길이 상한(폭주 방지)
-const RUN_TIMEOUT_MS = 15_000;            // 각 watcher 실행 타임아웃
+const RUN_TIMEOUT_MS = 8_000;            // 각 watcher 실행 타임아웃
 
 // 내부 상태
 let browser = null;
@@ -113,31 +113,53 @@ async function safeEvaluate(p, fn, args = [], retries = 2) {
     throw new Error('safeEvaluate: retries exhausted');
 }
 
-async function ensureCalendarOpen(p) {
-    await waitBookingReady(p);
+async function ensureBookingReady(page) {
+    await page.bringToFront();
+    await page.waitForFunction(() => document.readyState === 'complete', { timeout: 20_000 });
+    await page.waitForSelector('.dhx_cal_nav_button', { visible: true, timeout: 20_000 });
 
-    const openSelector = '.vfc-container';               // 실제 달력 루트 셀렉터로 조정
-    const triggerSelector = '.btn_clander, .open-calendar-btn'; // 열기 버튼 셀렉터 조정
-
-    if (await p.$(openSelector)) {
-        nodeLog('✅ 달력 이미 열려 있음');
-        return;
+    // 달력 열림 확인
+    const calendarOpen = await page.$('.vfc-main-container');
+    if (!calendarOpen) {
+        nodeLog('📅 달력 닫힘 상태 → 열기 시도');
+        try {
+            await page.waitForSelector('.btn_clander', { timeout: 8_000 });
+            await page.click('.btn_clander', { delay: 30 });
+            await page.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
+        } catch (e1) {
+            // ESC 후 재시도
+            await page.keyboard.press('Escape').catch(() => {});
+            await new Promise(r => setTimeout(r, 200)); // page.waitForTimeout 대체
+            try {
+                await page.click('.btn_clander', { delay: 30 });
+                await page.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
+            } catch (e2) {
+                nodeError('❌ 달력 열기 실패:', e2?.message || e2);
+                throw e2; // 여기서 바로 실패시켜 원인 파악 쉽게
+            }
+        }
+        nodeLog('✅ 달력 열림 확인');
     }
+}
 
-    await p.waitForSelector(triggerSelector, { visible: true, timeout: 10_000 });
-    await p.click(triggerSelector, { delay: 30 });
+// ⚠️ 네 코드와의 호환을 위해, ensureCalendarOpen 이름을 유지하는 얇은 래퍼 추가
+async function ensureCalendarOpen(page) {
+    return ensureBookingReady(page);
+}
 
-    try {
-        await p.waitForSelector(openSelector, { visible: true, timeout: 5_000 });
-        nodeLog('✅ 달력 열림 확인(1차)');
-        return;
-    } catch {}
+// 프로세스 이름(파일명과 같아야 함)
+const WATCHER_NAME = 'chrome_minimized_watcher.exe';
 
-    await p.keyboard.press('Escape').catch(() => {});
-    await p.waitForTimeout(200);
-    await p.click(triggerSelector, { delay: 30 });
-    await p.waitForSelector(openSelector, { visible: true, timeout: 8_000 });
-    nodeLog('✅ 달력 열림 확인(2차)');
+// ⬇️ 추가: 너무 자주 taskkill 하지 않도록 쿨다운
+let lastSweepAt = 0;
+const SWEEP_COOLDOWN_MS = 5000; // 5초 안에 또 쓸지 않음
+
+// 떠있는 watcher 프로세스를 전부 강제 종료 (Windows 전용)
+function killAllWatchers() {
+    return new Promise(res => {
+        if (process.platform !== 'win32') return res();
+        execFile('taskkill', ['/IM', WATCHER_NAME, '/T', '/F'], () => res());
+    });
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -148,46 +170,49 @@ async function ensureCalendarOpen(p) {
  */
 // ───────────────────────────────────────────────────────────────────────────────
 async function runWatcherOnce(exe, chromePid) {
-    // 이전 watcher가 살아있다면 "진짜 종료"까지 기다렸다가 새로 실행
-    await ensureStopped(watcherProcess);
 
-    const isExe = exe.toLowerCase().endsWith('.exe');
-    let cmd = exe, args = [];
-
-    if (isExe) {
-        // ★ EXE는 최소 인자만 (당신 로그 기준으로 미지원 플래그 제거)
-        args = [];
-        if (chromePid) { args.push('--pid', String(chromePid)); }
-        args.push('--restore-once'); // 1회 복원
-    } else {
-        // ★ PY 스크립트는 확장 인자 허용
-        cmd = process.env.PYTHON || 'python';
-        args = [exe];
-        if (chromePid) { args.push('--pid', String(chromePid)); }
-        args.push('--single-check', '--exit-if-not-found', '--timeout', '6', '--restore-once');
+    // 최근에 스윕 안 했을 때만 한 번 쓸기(과도한 taskkill 비용 방지, 모든 작업은 그대로 처리됨)
+    const now = Date.now();
+    if (now - lastSweepAt > SWEEP_COOLDOWN_MS) {
+      await killAllWatchers();
+      lastSweepAt = now;
     }
 
-    watcherProcess = spawn(cmd, args, { windowsHide: true });
+    await ensureStopped(watcherProcess);
+
+    const caps = await detectWatcherFeatures(exe);
+
+    // 신버전(옵션 지원) vs 구버전(restore-once만)
+    const args = caps.singleCheck
+        ? ['--pid', String(chromePid), '--single-check', '--exit-if-not-found', '--timeout', '3']
+        : ['--restore-once', '--pid', String(chromePid)];
+
+    watcherProcess = spawn(exe, args, { windowsHide: true });
+    nodeLog(`[PYTHON] started pid=${watcherProcess.pid} args=${args.join(' ')}`);
     watcherProcess.stdout.on('data', d => nodeLog('[PYTHON]', String(d).trim()));
     watcherProcess.stderr.on('data', d => nodeError('[PYTHON ERROR]', String(d).trim()));
 
-    const { code } = await onceExit(watcherProcess, 8000);
-    watcherProcess = null;
+    try {
+        const { code } = await onceExit(watcherProcess, 5000);
+        watcherProcess = null;
 
-    // PID 매칭 실패(code 101) → 전체 Chrome 대상으로 짧게 한 번 더 (가능한 경우만)
-    if (code === 101) {
-        const fbIsExe = isExe;
-        let fbCmd = exe, fbArgs = [];
-        if (fbIsExe) {
-            fbArgs = ['--restore-once'];
-        } else {
-            fbCmd = process.env.PYTHON || 'python';
-            fbArgs = [exe, '--single-check', '--timeout', '5', '--restore-once'];
+        // PID 매칭 실패 시 fallback
+        if (code === 101 || (!caps.singleCheck && code === 0)) {
+            // 신버전: code 101 → 전체 Chrome 대상으로 1회 더
+            // 구버전: 별도 코드가 없으므로 그냥 전체 대상으로 1회 더
+            const fbArgs = caps.singleCheck
+                ? ['--single-check', '--timeout', '3']
+                : ['--restore-once'];
+            const fb = spawn(exe, fbArgs, { windowsHide: true });
+            nodeLog(`[PYTHON-FB] started pid=${fb.pid} args=${fbArgs.join(' ')}`);
+            fb.stdout.on('data', d => nodeLog('[PYTHON-FB]', String(d).trim()));
+            fb.stderr.on('data', d => nodeError('[PYTHON-FB ERROR]', String(d).trim()));
+            await onceExit(fb, 4000);
         }
-        const fb = spawn(fbCmd, fbArgs, { windowsHide: true });
-        fb.stdout.on('data', d => nodeLog('[PYTHON-FB]', String(d).trim()));
-        fb.stderr.on('data', d => nodeError('[PYTHON-FB ERROR]', String(d).trim()));
-        await onceExit(fb, 6000);
+    } catch (err) {
+        await killAllWatchers();
+        watcherProcess = null;
+        throw err;
     }
 }
 
@@ -199,23 +224,25 @@ async function runWatcherOnce(exe, chromePid) {
  */
 // ───────────────────────────────────────────────────────────────────────────────
 async function drainRestoreQueue() {
-    if (processingQueue) return;
+    if (processingQueue) return;        // 중복 루프 방지 (락)
     processingQueue = true;
     try {
         while (restoreQueue.length) {
-            const job = restoreQueue.shift();
-            const { exe, pid, resolve, reject } = job;
+            const { exe, pid, resolve, reject } = restoreQueue.shift();
             try {
                 await runWithTimeout(runWatcherOnce(exe, pid), RUN_TIMEOUT_MS);
-                resolve(); // 해당 요청 완료
+                resolve();
             } catch (err) {
+                nodeError('restore job error:', err?.message || err);
+                // 타임아웃/에러 시 남아있는 watcher들 전부 정리
+                await killAllWatchers();
                 reject(err);
             }
         }
     } finally {
         processingQueue = false;
+        // 경계 타이밍 보호: 종료 직전에 push된 작업이 남아 있으면 재시작
         if (restoreQueue.length) {
-            // 에러는 로그만 남기고 누수 없이 재시작
             drainRestoreQueue().catch(err => nodeError('drainRestoreQueue error:', err?.message || err));
         }
     }
@@ -566,6 +593,27 @@ function getWatcherExePath() {
     throw new Error('[watcher EXE not found]\n' + candidates.join('\n'));
 }
 
+// EXE 옵션 지원 여부 캐싱
+let watcherCaps = null; // { singleCheck: boolean }
+
+async function detectWatcherFeatures(exe) {
+    if (watcherCaps) return watcherCaps;
+    watcherCaps = { singleCheck: false };
+    try {
+        await new Promise((resolve) => {
+            execFile(exe, ['--help'], (err, stdout, stderr) => {
+                const out = (stdout || '') + (stderr || '');
+                if (/--single-check/.test(out)) watcherCaps.singleCheck = true;
+                resolve();
+            });
+        });
+        nodeLog(`[watcher caps] singleCheck=${watcherCaps.singleCheck}`);
+    } catch (e) {
+        nodeError('watcher feature detect error:', e?.message || e);
+    }
+    return watcherCaps;
+}
+
 // ───────────────────────────────────────────────────────────────────────────────
 // 브라우저 종료
 //  - watcherProcess도 함께 정리
@@ -596,6 +644,7 @@ async function shutdownBrowser() {
             // ✅ watcherProcess 종료
             await ensureStopped(watcherProcess);
             watcherProcess = null;
+            await killAllWatchers(); // 혹시 남은 watcher들 전부 종료
             nodeLog('🧹 watcher 프로세스 종료 완료');
         }
     }
