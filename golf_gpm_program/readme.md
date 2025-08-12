@@ -22,6 +22,7 @@ cd E:\git\nodecrawling\golf_gpm_program
 # 빌드 실행
 npm run build
 
+
 https://fish-railway-308.notion.site/API-1c275c7d0bb28037bc7dcef7ec791595
 
 # 버전 수정

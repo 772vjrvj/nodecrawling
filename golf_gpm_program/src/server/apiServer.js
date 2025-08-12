@@ -184,13 +184,14 @@ async function handleReservationRetry(logEntry) {
         nodeLog('✅ 예약 탭 페이지 확보 완료');
 
         // 🔸 reload는 제거 (초기 SPA 리렌더 타이밍과 충돌로 컨텍스트 파괴 유발)
-        // await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
+        await page.reload({ waitUntil: 'networkidle2', timeout: 4000 });
+        nodeLog('✅ 리로드 완료');
 
         // 페이지 안정화 및 달력 열기
         await ensureBookingReady(page);
 
         // 약간의 여유
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 4000));
         nodeLog('⏳ 안정화 대기 완료');
 
         const { targetYear, targetMonth, targetDay } = parseBookingDate(bookingDate);
@@ -307,8 +308,8 @@ async function startApiServer(port = 32123) {
         const delayMs = type === 'm' ? 1000 * 60 * 5 : 1000 * 60;
         const logEntry = {
             id: generateId(),
-            bookingDate,
-            type,
+            bookingDate: bookingDate,
+            type: type,
             channel: type === 'm' ? '모바일' : '전화',
             requestDate: getNow(),
             endDate: '',
@@ -324,7 +325,14 @@ async function startApiServer(port = 32123) {
 
         // 직렬 큐에 예약: 지연 후 단건 처리
         enqueue(async () => {
-            await new Promise(r => setTimeout(r, delayMs));
+            const scheduledTime = new Date(new Date(logEntry.requestDate).getTime() + delayMs);
+            const now = new Date();
+            const remaining = scheduledTime - now;
+
+            if (remaining > 0) {
+                await new Promise(r => setTimeout(r, remaining));
+            }
+
             await handleReservationRetry(logEntry);
         });
     });

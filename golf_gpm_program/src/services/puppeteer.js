@@ -139,6 +139,9 @@ async function ensureBookingReady(page) {
             }
         }
         nodeLog('✅ 달력 열림 확인');
+        await page.click('.btn_clander', { delay: 30 });
+        await new Promise(res => setTimeout(res, 300));
+        nodeLog('✅ 달력 닫기');
     }
 }
 
