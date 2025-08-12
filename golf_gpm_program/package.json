@@ -1,6 +1,6 @@
 {
   "name": "PandoP",
-  "version": "0.13.0",
+  "version": "0.17.0",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -36,7 +36,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": false,
-      "createDesktopShortcut": true,
+      "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "PandoP"
     }
