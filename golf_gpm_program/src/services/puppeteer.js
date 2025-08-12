@@ -19,7 +19,7 @@ let processingQueue = false;              // 큐 처리 루프 동작 여부
 
 // 안전장치
 const MAX_RESTORE_QUEUE = 20;             // 큐 길이 상한(폭주 방지)
-const RUN_TIMEOUT_MS = 8_000;            // 각 watcher 실행 타임아웃
+const RUN_TIMEOUT_MS = 8_000;             // 각 watcher 실행 타임아웃
 
 // 내부 상태
 let browser = null;
@@ -29,9 +29,16 @@ let page = null;
 let mainPage = null;        // 로그인/메인 탭
 let reservationPage = null; // 예약 탭
 
+// 최초 1회만 달력 스모크 체크(열기→닫기)
+let didCalendarSmokeCheck = false;
+
+// ───────────────────────────────────────────────────────────────────────────────
+// 유틸: 공통 sleep (Puppeteer v20+에서 page.waitForTimeout 대체)
+// ───────────────────────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
 // ───────────────────────────────────────────────────────────────────────────────
 // 유틸: child process 종료 이벤트를 Promise로 대기
-//  - kill()은 "종료 요청"일 뿐 → 실제 종료(close/exit)까지 기다려야 안전
 // ───────────────────────────────────────────────────────────────────────────────
 function onceExit(child, timeoutMs = 1500) {
     return new Promise((resolve, reject) => {
@@ -47,10 +54,7 @@ function onceExit(child, timeoutMs = 1500) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-/** 유틸: 안전 종료
- *  - 1차: proc.kill() 후 종료 대기
- *  - 2차: 타임아웃이면 강제 종료(taskkill / SIGKILL)
- */
+/** 유틸: 안전 종료 */
 // ───────────────────────────────────────────────────────────────────────────────
 async function ensureStopped(proc) {
     if (!proc || proc.killed) return;
@@ -72,7 +76,7 @@ async function ensureStopped(proc) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// 유틸: Promise 타임아웃 래퍼(희귀한 행 끊기)
+// 유틸: Promise 타임아웃 래퍼
 // ───────────────────────────────────────────────────────────────────────────────
 async function runWithTimeout(promise, ms) {
     let t;
@@ -87,67 +91,44 @@ async function runWithTimeout(promise, ms) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// (추가) 예약 페이지 안정화 유틸
+// 예약 페이지 안정화/달력 유틸
 // ───────────────────────────────────────────────────────────────────────────────
-async function waitBookingReady(p) {
+
+/** 예약 페이지 준비(페이지 로드/핵심 요소만 확인) - 달력 토글 X */
+async function ensureBookingReady(p) {
     await p.bringToFront();
     await p.waitForFunction(() => document.readyState === 'complete', { timeout: 20_000 });
-    // 예약 UI 핵심 요소 존재 확인 (사이트 상황에 맞춰 key selector 사용)
     await p.waitForSelector('.dhx_cal_nav_button', { visible: true, timeout: 20_000 });
 }
 
-async function safeEvaluate(p, fn, args = [], retries = 2) {
-    for (let i = 0; i <= retries; i++) {
-        try {
-            return await p.evaluate(fn, ...args);
-        } catch (e) {
-            const msg = String(e && e.message || e);
-            if (/Execution context was destroyed|Cannot find context/i.test(msg) && i < retries) {
-                nodeLog('♻️ evaluate 컨텍스트 복구 재시도');
-                await waitBookingReady(p);
-                continue;
-            }
-            throw e;
-        }
-    }
-    throw new Error('safeEvaluate: retries exhausted');
-}
-
-async function ensureBookingReady(page) {
-    await page.bringToFront();
-    await page.waitForFunction(() => document.readyState === 'complete', { timeout: 20_000 });
-    await page.waitForSelector('.dhx_cal_nav_button', { visible: true, timeout: 20_000 });
-
-    // 달력 열림 확인
-    const calendarOpen = await page.$('.vfc-main-container');
-    if (!calendarOpen) {
-        nodeLog('📅 달력 닫힘 상태 → 열기 시도');
-        try {
-            await page.waitForSelector('.btn_clander', { timeout: 8_000 });
-            await page.click('.btn_clander', { delay: 30 });
-            await page.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
-        } catch (e1) {
-            // ESC 후 재시도
-            await page.keyboard.press('Escape').catch(() => {});
-            await new Promise(r => setTimeout(r, 200)); // page.waitForTimeout 대체
-            try {
-                await page.click('.btn_clander', { delay: 30 });
-                await page.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
-            } catch (e2) {
-                nodeError('❌ 달력 열기 실패:', e2?.message || e2);
-                throw e2; // 여기서 바로 실패시켜 원인 파악 쉽게
-            }
-        }
-        nodeLog('✅ 달력 열림 확인');
-        await page.click('.btn_clander', { delay: 30 });
-        await new Promise(res => setTimeout(res, 300));
-        nodeLog('✅ 달력 닫기');
+/** 달력 '열림' 보장 */
+async function ensureCalendarOpen(p) {
+    await p.waitForSelector('.btn_clander', { timeout: 8_000 });
+    const opened = await p.$('.vfc-main-container');
+    if (!opened) {
+        await p.click('.btn_clander', { delay: 30 });
+        await p.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
+        await sleep(200); // 약간의 안정화
+        nodeLog('✅ 달력 열림');
     }
 }
 
-// ⚠️ 네 코드와의 호환을 위해, ensureCalendarOpen 이름을 유지하는 얇은 래퍼 추가
-async function ensureCalendarOpen(page) {
-    return ensureBookingReady(page);
+/** 달력 '닫힘' 보장 (초기화/스모크 전용) */
+async function ensureCalendarClosed(p) {
+    await p.waitForSelector('.btn_clander', { timeout: 8_000 });
+    const opened = await p.$('.vfc-main-container');
+    if (opened) {
+        await p.click('.btn_clander', { delay: 30 });
+        await sleep(300); // 닫힘 애니메이션 대기
+        nodeLog('✅ 달력 닫힘');
+    }
+}
+
+/** 최초 1회만: 달력 열리고 닫히는지 스모크 체크 */
+async function calendarSmokeCheck(p) {
+    await ensureBookingReady(p);
+    await ensureCalendarOpen(p);
+    await ensureCalendarClosed(p);
 }
 
 // 프로세스 이름(파일명과 같아야 함)
@@ -166,26 +147,19 @@ function killAllWatchers() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-/** 내부: watcher 1회 실행 로직
- *  - EXE와 PY 스크립트의 인자 호환 문제 해결
- *  - EXE: '--restore-once', '--pid'만 사용 (추가 플래그 미지원)
- *  - PY : '--single-check' 등 확장 인자 허용
- */
+/** 내부: watcher 1회 실행 로직 */
 // ───────────────────────────────────────────────────────────────────────────────
 async function runWatcherOnce(exe, chromePid) {
-
-    // 최근에 스윕 안 했을 때만 한 번 쓸기(과도한 taskkill 비용 방지, 모든 작업은 그대로 처리됨)
+    // 최근에 스윕 안 했을 때만 한 번 쓸기(과도한 taskkill 비용 방지)
     const now = Date.now();
     if (now - lastSweepAt > SWEEP_COOLDOWN_MS) {
-      await killAllWatchers();
-      lastSweepAt = now;
+        await killAllWatchers();
+        lastSweepAt = now;
     }
 
     await ensureStopped(watcherProcess);
 
     const caps = await detectWatcherFeatures(exe);
-
-    // 신버전(옵션 지원) vs 구버전(restore-once만)
     const args = caps.singleCheck
         ? ['--pid', String(chromePid), '--single-check', '--exit-if-not-found', '--timeout', '3']
         : ['--restore-once', '--pid', String(chromePid)];
@@ -201,8 +175,6 @@ async function runWatcherOnce(exe, chromePid) {
 
         // PID 매칭 실패 시 fallback
         if (code === 101 || (!caps.singleCheck && code === 0)) {
-            // 신버전: code 101 → 전체 Chrome 대상으로 1회 더
-            // 구버전: 별도 코드가 없으므로 그냥 전체 대상으로 1회 더
             const fbArgs = caps.singleCheck
                 ? ['--single-check', '--timeout', '3']
                 : ['--restore-once'];
@@ -220,14 +192,10 @@ async function runWatcherOnce(exe, chromePid) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-/** 큐 처리 루프
- *  - restoreQueue에 쌓인 요청을 FIFO로 하나씩 실행
- *  - 각 요청은 runWatcherOnce(exe,pid) 완료 시 resolve/reject 호출
- *  - 각 실행에 타임아웃 가드 적용
- */
+/** 큐 처리 루프 */
 // ───────────────────────────────────────────────────────────────────────────────
 async function drainRestoreQueue() {
-    if (processingQueue) return;        // 중복 루프 방지 (락)
+    if (processingQueue) return; // 중복 루프 방지 (락)
     processingQueue = true;
     try {
         while (restoreQueue.length) {
@@ -280,7 +248,7 @@ async function initBrowser(chromePath) {
             headless: false,
             executablePath: chromePath,
             defaultViewport: null,
-            protocolTimeout: 180_000, // ★ Runtime.callFunctionOn 타임아웃 완화
+            protocolTimeout: 180_000,
             args: [
                 '--window-size=800,300',
                 '--window-position=0,800',
@@ -343,14 +311,21 @@ async function login({ userId, password, token, chromePath }) {
 
         // 입력
         await page.waitForSelector('#user_id', { timeout: 10_000 });
+        //글자 한개당 0.05초씩 대기
         await page.type('#user_id', userId, { delay: 50 });
 
         await page.waitForSelector('#user_pw', { timeout: 10_000 });
         await page.type('#user_pw', password, { delay: 50 });
 
         // 제출 및 네비게이션 동시대기
+        // 로그인 버튼 클릭 후 페이지 전환까지 동시에 대기
         await Promise.all([
+            // 로그인 버튼 클릭
             page.click("button[type='submit']"),
+
+            // 페이지 네비게이션 완료 대기
+            // - waitUntil: 'networkidle0' → 네트워크 연결이 거의 없을 때까지 대기
+            //   (모든 요청이 끝났다고 판단되는 시점)
             page.waitForNavigation({ waitUntil: 'networkidle0' }),
         ]);
 
@@ -359,28 +334,40 @@ async function login({ userId, password, token, chromePath }) {
         let hookConnected = false;
 
         // 새 탭(target) 후킹
+        // 새로 열리는 페이지(탭)를 기다리는 Promise 생성
         const newPagePromise = new Promise(resolve => {
+            // 브라우저에서 새로운 target(탭/페이지)이 생성될 때 한 번만 실행
             page.browser().once('targetcreated', async target => {
                 try {
+                    // 생성된 target을 Page 객체로 변환
                     const newPage = await target.page();
+
+                    // 새 페이지가 없거나 이미 닫혀있으면 에러
                     if (!newPage || newPage.isClosed()) {
                         throw new Error('❌ 예약 페이지 탭이 열리지 않았습니다.');
                     }
+
+                    // 해당 페이지에 Request Hook(네트워크 요청 가로채기) 연결
                     attachRequestHooks(newPage);
                     hookConnected = true;
                     nodeLog('🔌 Request hook connected (in login)');
 
-                    // 기본 타임아웃
-                    newPage.setDefaultTimeout(30_000);
-                    newPage.setDefaultNavigationTimeout(60_000);
+                    // 페이지 기본 타임아웃 설정
+                    newPage.setDefaultTimeout(30_000);            // 요소 찾기 등 기본 작업 최대 30초
+                    newPage.setDefaultNavigationTimeout(60_000);  // 페이지 이동 최대 60초
 
+                    // 예약 페이지 참조 저장
                     reservationPage = newPage;
+
+                    // Promise 성공(resolve)
                     resolve(newPage);
                 } catch (error) {
+                    // targetcreated 처리 중 예외 발생 시 로그 출력
                     nodeError('❌ targetcreated 처리 중 에러:', error.message);
                 }
             });
         });
+
 
         // 예약 버튼 클릭 → 새 탭 생성
         nodeLog('📆 예약 버튼 클릭 시도');
@@ -403,26 +390,20 @@ async function login({ userId, password, token, chromePath }) {
         nodeLog('🟢 예약 페이지 접근됨:', newPage.url());
 
         // 첫 상호작용 안정화
-        await waitBookingReady(newPage);
-        try { await ensureCalendarOpen(newPage); } catch (e) { nodeError('달력 열기 실패(무시 가능):', e.message); }
+        await ensureBookingReady(newPage);
 
-        // 후킹 실패 시 대비
-        setTimeout(async () => {
-            if (!hookConnected) {
-                try {
-                    const pages = await _browser.pages();
-                    const fallbackPage = pages.find(p => p.url().includes('reservation') || p.url().includes('/ui/booking'));
-                    if (fallbackPage && !fallbackPage.isClosed()) {
-                        attachRequestHooks(fallbackPage);
-                        nodeLog('🔁 fallback hook connected (reservation page)');
-                        reservationPage = fallbackPage;
-                    }
-                } catch (e) {
-                    nodeError('❌ fallback hook 처리 중 에러:', e.message);
-                }
+        // 최초 1회만 스모크 체크(열림 확인 후 닫기)
+        if (!didCalendarSmokeCheck) {
+            try {
+                await calendarSmokeCheck(newPage);
+                didCalendarSmokeCheck = true;
+                nodeLog('🧪 달력 스모크 체크 완료(열기→닫기)');
+            } catch (e) {
+                nodeError('❌ 달력 스모크 체크 실패(무시 가능):', e.message);
             }
-        }, 5000);
+        }
 
+        // 이후 동작은 실제 예약 시 apiServer 쪽에서 열어서 사용
         return newPage;
     } catch (err) {
         nodeError('❌ login() 함수 실행 중 에러:', err.message);
@@ -444,8 +425,7 @@ async function findReservationTab() {
         if (exists) {
             nodeLog('✅ 예약 탭(보관 참조) 찾음:', reservationPage.url());
             // 첫 상호작용 안정화
-            try { await waitBookingReady(reservationPage); } catch (e) {}
-            try { await ensureCalendarOpen(reservationPage); } catch (e) {}
+            try { await ensureBookingReady(reservationPage); } catch (e) {}
             return reservationPage;
         }
     }
@@ -461,8 +441,7 @@ async function findReservationTab() {
                 nodeLog('✅ 예약 탭 찾음:', url);
                 reservationPage = p;
                 // 안정화
-                try { await waitBookingReady(reservationPage); } catch (e) {}
-                try { await ensureCalendarOpen(reservationPage); } catch (e) {}
+                try { await ensureBookingReady(reservationPage); } catch (e) {}
                 return p;
             }
         }
@@ -540,11 +519,7 @@ function getPage() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-/** Chrome 최소화 복원 (Python watcher 실행)
- *  - 동시/연속 요청을 **모두 처리**하되, 큐에 저장하여 **겹치지 않게 순차 실행**
- *  - 각 호출은 자신의 작업이 완료될 때 resolve되는 Promise를 반환
- *  - 큐 길이 상한을 넘으면 에러로 빠르게 거절(폭주 방지)
- */
+/** Chrome 최소화 복원 (Python watcher 실행) */
 // ───────────────────────────────────────────────────────────────────────────────
 async function restoreChromeIfMinimized() {
     if (!browser || !browser.process || !browser.process()) {
@@ -618,8 +593,7 @@ async function detectWatcherFeatures(exe) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
-// 브라우저 종료
-//  - watcherProcess도 함께 정리
+// 브라우저 종료 (watcherProcess도 함께 정리)
 // ───────────────────────────────────────────────────────────────────────────────
 async function shutdownBrowser() {
     if (browser) {

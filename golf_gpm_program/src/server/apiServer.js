@@ -9,6 +9,9 @@ try { app = require('electron').app; } catch { app = null; }
 
 let serverInstance = null;
 
+// 공통 sleep
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
 // ─────────────────────────────────────────────────────────
 // 로그 파일 경로
 // ─────────────────────────────────────────────────────────
@@ -113,15 +116,14 @@ function parseBookingDate(bookingDate) {
 
 // ─────────────────────────────────────────────────────────
 // (중요) 첫 요청 안정화: 예약 탭 준비/달력 열기
-//  - puppeteer.findReservationTab()가 1차 안정화하나,
-//    SPA 타이밍 문제 대비하여 서버단에서도 한 번 더 보강
+//    - 이 함수는 "열기만" 하고 닫지 않음 (작업은 열린 상태에서 진행)
 // ─────────────────────────────────────────────────────────
 async function ensureBookingReady(page) {
     await page.bringToFront();
     await page.waitForFunction(() => document.readyState === 'complete', { timeout: 20_000 });
     await page.waitForSelector('.dhx_cal_nav_button', { visible: true, timeout: 20_000 });
 
-    // 달력 열림 확인
+    // 달력 열림 확인 → 닫혀있으면 열기
     const calendarOpen = await page.$('.vfc-main-container');
     if (!calendarOpen) {
         nodeLog('📅 달력 닫힘 상태 → 열기 시도');
@@ -132,7 +134,7 @@ async function ensureBookingReady(page) {
         } catch {
             // ESC 후 재시도
             await page.keyboard.press('Escape').catch(() => {});
-            await page.waitForTimeout(200);
+            await sleep(200);
             await page.click('.btn_clander', { delay: 30 });
             await page.waitForSelector('.vfc-main-container', { visible: true, timeout: 8_000 });
         }
@@ -141,20 +143,35 @@ async function ensureBookingReady(page) {
 }
 
 // ─────────────────────────────────────────────────────────
-// (선택) 직렬 큐로 동시 처리 방지
+// (선택) 직렬 큐 + inFlight 가드로 중복 실행 방지
 // ─────────────────────────────────────────────────────────
 const q = [];
 let qRunning = false;
-function enqueue(job) {
-    q.push(job);
+const inFlight = new Set(); // ← 추가(수정 2)
+
+function enqueue(id, job) {
+    // 이미 같은 id의 작업이 큐에 있거나 실행 중이면 스킵
+    if (inFlight.has(id)) {
+        nodeLog(`⏭️ 중복 작업 스킵 (id=${id})`);
+        return;
+    }
+    inFlight.add(id);
+    q.push({ id, job });
     if (!qRunning) drain();
 }
+
 async function drain() {
     qRunning = true;
     try {
         while (q.length) {
-            const job = q.shift();
-            await job().catch(e => nodeError('❌ 큐 작업 실패:', e.message));
+            const { id, job } = q.shift();
+            try {
+                await job();
+            } catch (e) {
+                nodeError('❌ 큐 작업 실패:', e.message);
+            } finally {
+                inFlight.delete(id);
+            }
         }
     } finally {
         qRunning = false;
@@ -163,35 +180,34 @@ async function drain() {
 
 // ─────────────────────────────────────────────────────────
 // 예약 처리 (단건)
-//  - reload 제거 (첫 요청 컨텍스트 파괴 방지)
-//  - 준비/달력 열기 보강
+//  - 항상 리로드 → 4초 대기 → ensureBookingReady(열림 보장) → 월/일 클릭
 // ─────────────────────────────────────────────────────────
 async function handleReservationRetry(logEntry) {
-    const { bookingDate, retryCnt } = logEntry;
-
-    if (retryCnt > 5) {
-        logEntry.result = 'stop';
-        logEntry.error = 'retry limit exceeded';
-        nodeLog(`⚠️ 예약 재시도 중단 (id=${logEntry.id}) → retryCnt=${retryCnt} > 5`);
-        updateLog({ ...logEntry, endDate: getNow() });
-        return;
-    }
-
-    nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
-
     try {
+        const { bookingDate, retryCnt } = logEntry;
+
+        if (retryCnt > 5) {
+            logEntry.result = 'stop';
+            logEntry.error = 'retry limit exceeded';
+            nodeLog(`⚠️ 예약 재시도 중단 (id=${logEntry.id}) → retryCnt=${retryCnt} > 5`);
+            updateLog({ ...logEntry, endDate: getNow() });
+            return;
+        }
+
+        nodeLog(`🧾 예약 요청 데이터:\n${JSON.stringify(logEntry, null, 2)}`);
+
         const page = await findReservationTab();
         nodeLog('✅ 예약 탭 페이지 확보 완료');
 
-        // 🔸 reload는 제거 (초기 SPA 리렌더 타이밍과 충돌로 컨텍스트 파괴 유발)
-        await page.reload({ waitUntil: 'networkidle2', timeout: 4000 });
-        nodeLog('✅ 리로드 완료');
+        // 항상 리로드 + 안정화 대기
+        await page.reload({ waitUntil: 'networkidle2', timeout: 60_000 });
+        await sleep(4000); // 4초 권장(3초 부족 케이스 방지)
 
-        // 페이지 안정화 및 달력 열기
+        // 페이지 안정화 및 달력 열기 보장
         await ensureBookingReady(page);
 
         // 약간의 여유
-        await new Promise(r => setTimeout(r, 4000));
+        await sleep(800);
         nodeLog('⏳ 안정화 대기 완료');
 
         const { targetYear, targetMonth, targetDay } = parseBookingDate(bookingDate);
@@ -216,7 +232,7 @@ async function handleReservationRetry(logEntry) {
             for (let i = 0; i < clicks; i++) {
                 await page.waitForSelector(selector, { timeout: 5_000 });
                 await page.click(selector);
-                await page.waitForTimeout(350);
+                await sleep(350);
             }
             nodeLog(`↔️ 달력 ${direction} 방향으로 ${clicks}회 이동 완료`);
         }
@@ -271,11 +287,7 @@ function retryFailedReservations() {
         return;
     }
 
-    const failEntries = data.filter(entry =>
-        entry.result !== 'success' &&
-        entry.result !== 'stop' &&
-        entry.retryCnt <= 5
-    );
+    const failEntries = data.filter(entry => entry.result === 'fail');
 
     if (failEntries.length === 0) {
         nodeLog('✅ 실패 로그 없음 → 재시도 생략');
@@ -286,9 +298,11 @@ function retryFailedReservations() {
 
     failEntries.forEach((entry, idx) => {
         entry.retryCnt++;
-        nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, bookingDate=${entry.bookingDate}, retryCnt=${entry.retryCnt})`);
-        // 직렬 큐로 순차 실행
-        enqueue(() => new Promise(res => setTimeout(res, 5000 * idx)).then(() => handleReservationRetry(entry)));
+        nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, bookingDate=${entry.bookingDate}, retryCnt=${entry.retryCnt}, result=${entry.result})`);
+        // 직렬 큐에 순차 실행 (+ 중복 방지 inFlight)
+        enqueue(entry.id, async () => {
+            await handleReservationRetry(entry);
+        });
     });
 }
 
@@ -312,6 +326,7 @@ async function startApiServer(port = 32123) {
             type: type,
             channel: type === 'm' ? '모바일' : '전화',
             requestDate: getNow(),
+            requestTs: Date.now(),     // ← 추가(수정 1)
             endDate: '',
             result: 'pending',
             error: null,
@@ -323,14 +338,13 @@ async function startApiServer(port = 32123) {
 
         writeLog(logEntry);
 
-        // 직렬 큐에 예약: 지연 후 단건 처리
-        enqueue(async () => {
-            const scheduledTime = new Date(new Date(logEntry.requestDate).getTime() + delayMs);
-            const now = new Date();
-            const remaining = scheduledTime - now;
+        // 직렬 큐에 예약: "요청시각 기준" 예약 실행 (지연 중복 방지)
+        enqueue(logEntry.id, async () => {   // ← inFlight 가드 적용(수정 2)
+            const scheduledMs = logEntry.requestTs + delayMs; // ← 안전한 숫자 연산(수정 1)
+            const remaining = scheduledMs - Date.now();
 
             if (remaining > 0) {
-                await new Promise(r => setTimeout(r, remaining));
+                await sleep(remaining);
             }
 
             await handleReservationRetry(logEntry);
