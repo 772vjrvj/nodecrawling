@@ -7,13 +7,14 @@
     "build": "electron-builder"
   },
   "build": {
+    "appId": "com.pandop.hooking",
     "productName": "PandoP",
+    "artifactName": "${productName}-${version}-Setup.${ext}",
     "asar": true,
     "files": [
       "index.html",
       "src/**/*",
-      "logs/**/*",
-      "assets/icons/판도P-ICON.ico",
+      "assets/**",
       "package.json"
     ],
     "extraFiles": [
@@ -21,10 +22,13 @@
     ],
     "extraResources": [
       { "from": "resources/python", "to": "python" },
-      { "from": "logs", "to": "logs" }
+      { "from": "logs", "to": "logs" },
+      { "from": "assets/tray.ico", "to": "assets/tray.ico" },
+      { "from": "assets/icons/판도P-ICON.ico", "to": "assets/icons/판도P-ICON.ico" }
     ],
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "assets"
     },
     "win": {
       "target": "nsis",

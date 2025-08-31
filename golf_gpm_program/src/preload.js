@@ -47,4 +47,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     requestRelaunch: (reason) => ipcRenderer.invoke('request-relaunch', reason),
 
     quitApp: () => ipcRenderer.invoke('quit-app'),
+
+    hideToTray: () => ipcRenderer.send('ui:hide-to-tray'),
+    quit: () => ipcRenderer.invoke('app:quit'),
+
 });
