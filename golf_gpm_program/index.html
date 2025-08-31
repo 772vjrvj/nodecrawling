@@ -96,6 +96,53 @@
             gap: 10px;
             margin-top: 10px;
         }
+
+
+        /* === Auto Login Checkbox === */
+        .auto-login-wrap {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin: 6px 0 14px;
+            user-select: none;
+        }
+
+        /* 기본 체크박스 숨기고 커스텀 */
+        .auto-login-wrap input[type="checkbox"] {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .auto-login-wrap label {
+            font-size: 13px;
+            color: #444;
+            cursor: pointer;             /* 손가락 커서 */
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* 인디케이터(라운드) */
+        .auto-login-indicator {
+            width: 18px;
+            height: 18px;
+            border-radius: 9px;           /* 동그라미 */
+            border: 1px solid #888;
+            background-color: #f0f0f0;
+            display: inline-block;
+            position: relative;
+            transition: background-color 0.15s ease, border-color 0.15s ease;
+        }
+
+        /* 체크 시 배경색 */
+        .auto-login-wrap input[type="checkbox"]:checked + .auto-login-indicator {
+            background-color: #4682B4;
+            border-color: #4682B4;
+        }
+
+
     </style>
 </head>
 <body>
@@ -120,6 +167,14 @@
 </div>
 
 <div class="info-box" style="text-align: center;">
+    <div class="auto-login-wrap">
+        <label for="auto-login">
+            <!-- 숨긴 체크박스 + 커스텀 인디케이터 -->
+            <input id="auto-login" type="checkbox" />
+            <span class="auto-login-indicator" aria-hidden="true"></span>
+            자동 로그인
+        </label>
+    </div>
     <button onclick="startAction()">시작</button>
 </div>
 

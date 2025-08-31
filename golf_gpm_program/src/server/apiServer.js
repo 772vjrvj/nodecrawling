@@ -7,6 +7,9 @@ const { findReservationTab } = require('../services/puppeteer'); // 안정화 �
 let app = null;
 try { app = require('electron').app; } catch { app = null; }
 
+// [ADD] 앱 재시작 공용 유틸(중복/쿨다운 가드 포함)
+const { requestRelaunch } = require('../utils/relaunch');
+
 let serverInstance = null;
 
 // 공통 sleep
@@ -144,13 +147,15 @@ async function ensureBookingReady(page) {
 
 // ─────────────────────────────────────────────────────────
 // (선택) 직렬 큐 + inFlight 가드로 중복 실행 방지
+//  - q: 작업 대기열 (FIFO)
+//  - inFlight: "이미 큐에 들어왔거나 실행 중"인 작업 id 모음(Set)
+//    → 동일 id가 다시 들어오면 enqueue 시점에 스킵(drop-new 정책)
 // ─────────────────────────────────────────────────────────
 const q = [];
 let qRunning = false;
-const inFlight = new Set(); // ← 추가(수정 2)
+const inFlight = new Set();
 
 function enqueue(id, job) {
-    // 이미 같은 id의 작업이 큐에 있거나 실행 중이면 스킵
     if (inFlight.has(id)) {
         nodeLog(`⏭️ 중복 작업 스킵 (id=${id})`);
         return;
@@ -199,20 +204,15 @@ async function handleReservationRetry(logEntry) {
         const page = await findReservationTab();
         nodeLog('✅ 예약 탭 페이지 확보 완료');
 
-        // 항상 리로드 + 안정화 대기
         await page.reload({ waitUntil: 'networkidle2', timeout: 60_000 });
-        await sleep(4000); // 4초 권장(3초 부족 케이스 방지)
+        await sleep(4000);
 
-        // 페이지 안정화 및 달력 열기 보장
         await ensureBookingReady(page);
-
-        // 약간의 여유
         await sleep(800);
         nodeLog('⏳ 안정화 대기 완료');
 
         const { targetYear, targetMonth, targetDay } = parseBookingDate(bookingDate);
 
-        // 현재 달/년 읽기
         await page.waitForSelector('.vfc-top-date.vfc-center', { timeout: 10_000 });
         const { currentYear, currentMonth } = await page.evaluate(() => {
             const els = document.querySelectorAll('.vfc-top-date.vfc-center a');
@@ -223,7 +223,6 @@ async function handleReservationRetry(logEntry) {
         });
         nodeLog(`📆 현재 달력 위치: ${currentYear}년 ${currentMonth}월 / 목표: ${targetYear}년 ${targetMonth}월`);
 
-        // 월 이동
         const diffMonth = (targetYear - currentYear) * 12 + (targetMonth - currentMonth);
         if (diffMonth !== 0) {
             const direction = diffMonth > 0 ? 'right' : 'left';
@@ -237,7 +236,6 @@ async function handleReservationRetry(logEntry) {
             nodeLog(`↔️ 달력 ${direction} 방향으로 ${clicks}회 이동 완료`);
         }
 
-        // 날짜 클릭
         const clicked = await page.evaluate((day) => {
             const weeks = document.querySelectorAll('.vfc-week');
             for (const week of weeks) {
@@ -299,7 +297,6 @@ function retryFailedReservations() {
     failEntries.forEach((entry, idx) => {
         entry.retryCnt++;
         nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, bookingDate=${entry.bookingDate}, retryCnt=${entry.retryCnt}, result=${entry.result})`);
-        // 직렬 큐에 순차 실행 (+ 중복 방지 inFlight)
         enqueue(entry.id, async () => {
             await handleReservationRetry(entry);
         });
@@ -326,7 +323,7 @@ async function startApiServer(port = 32123) {
             type: type,
             channel: type === 'm' ? '모바일' : '전화',
             requestDate: getNow(),
-            requestTs: Date.now(),     // ← 추가(수정 1)
+            requestTs: Date.now(),
             endDate: '',
             result: 'pending',
             error: null,
@@ -338,15 +335,26 @@ async function startApiServer(port = 32123) {
 
         writeLog(logEntry);
 
-        // 직렬 큐에 예약: "요청시각 기준" 예약 실행 (지연 중복 방지)
-        enqueue(logEntry.id, async () => {   // ← inFlight 가드 적용(수정 2)
-            const scheduledMs = logEntry.requestTs + delayMs; // ← 안전한 숫자 연산(수정 1)
-            const remaining = scheduledMs - Date.now();
-
-            if (remaining > 0) {
-                await sleep(remaining);
+        // ─────────────────────────────────────────────────────
+        // [MODIFY] 브라우저 헬스체크 → 죽어있으면 "공용 재시작" 요청
+        //  - __health__/__restart__ 고정 id → inFlight로 중복 방지
+        //  - requestRelaunch() 자체가 내부 쿨다운/중복 가드 포함
+        // ─────────────────────────────────────────────────────
+        enqueue('__health__', async () => {
+            const alive = await isBrowserAliveQuick(2500);
+            if (!alive) {
+                nodeError('🧨 브라우저 꺼짐 감지 → 앱 재시작 요청');
+                enqueue('__restart__', async () =>
+                   requestRelaunch({ reason: 'browser not alive on API request' })
+                );
             }
+        });
 
+        // 직렬 큐에 예약: "요청시각 기준" 예약 실행
+        enqueue(logEntry.id, async () => {
+            const scheduledMs = logEntry.requestTs + delayMs;
+            const remaining = scheduledMs - Date.now();
+            if (remaining > 0) await sleep(remaining);
             await handleReservationRetry(logEntry);
         });
     });
@@ -356,8 +364,108 @@ async function startApiServer(port = 32123) {
         nodeLog(`🌐 API 서버 실행 중: http://localhost:${port}/reseration`);
     });
 
+    // (옵션) 이전 비정상 종료로 남아있을 수도 있는 .tmp를 정리
+    try { fs.unlinkSync(getReservationLogPath() + '.tmp'); } catch (_) {}
+
     // 10분마다 실패 재시도
     setInterval(retryFailedReservations, 1000 * 60 * 10);
+
+    // [ADD] 매일 7일 경과 로그 자동 정리 (자정+5분, 즉시 1회 포함)
+    scheduleDailyPurge(PURGE_DAYS);
+}
+
+// ─────────────────────────────────────────────────────────
+// [ADD] 7일 초과 로그 정리 유틸
+// ─────────────────────────────────────────────────────────
+const PURGE_DAYS = 7;
+let purgeTimeoutId = null;
+let purgeIntervalId = null;
+
+function parseEntryTs(entry) {
+    if (Number.isFinite(entry?.requestTs)) return entry.requestTs;
+
+    const s = (entry?.endDate && String(entry.endDate).trim())
+        || (entry?.requestDate && String(entry.requestDate).trim());
+    if (!s) return 0;
+
+    const m = s.match(/^(\d{4})\.(\d{2})\.(\d{2}) (\d{2}):(\d{2}):(\d{2})\.(\d{3})$/);
+    if (!m) return 0;
+
+    const [, Y, Mo, D, h, mi, se, ms] = m.map(Number);
+    return new Date(Y, Mo - 1, D, h, mi, se, ms).getTime();
+}
+
+function atomicWriteJsonArray(filePath, arr) {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+    const tmp = filePath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(arr, null, 2), 'utf-8');
+    fs.renameSync(tmp, filePath);
+}
+
+function purgeOldLogs(days = PURGE_DAYS) {
+    const logPath = getReservationLogPath();
+    if (!fs.existsSync(logPath)) return;
+
+    let data = [];
+    try {
+        const raw = fs.readFileSync(logPath, 'utf-8').trim();
+        data = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+        nodeError('❌ purgeOldLogs: JSON 파싱 실패 → 정리 건너뜀:', e.message);
+        return;
+    }
+
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const before = data.length;
+
+    const kept = data.filter(entry => parseEntryTs(entry) >= cutoff);
+
+    if (kept.length !== before) {
+        try {
+            atomicWriteJsonArray(logPath, kept);
+            nodeLog(`🧹 7일 경과 로그 정리 완료: ${before - kept.length}건 삭제, ${kept.length}건 유지`);
+        } catch (e) {
+            nodeError('❌ purgeOldLogs: 쓰기 실패:', e.message);
+        }
+    } else {
+        nodeLog('🧹 7일 경과 로그 없음 → 정리 생략');
+    }
+}
+
+function scheduleDailyPurge(days = PURGE_DAYS) {
+    if (purgeTimeoutId) { clearTimeout(purgeTimeoutId); purgeTimeoutId = null; }
+    if (purgeIntervalId) { clearInterval(purgeIntervalId); purgeIntervalId = null; }
+
+    const run = () => enqueue('__purge__', async () => purgeOldLogs(days));
+
+    run();
+
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 5, 0, 0);
+    const delay = Math.max(0, next.getTime() - now.getTime());
+
+    purgeTimeoutId = setTimeout(() => {
+        run();
+        purgeIntervalId = setInterval(run, 24 * 60 * 60 * 1000);
+    }, delay);
+}
+
+// ─────────────────────────────────────────────────────────
+// [KEEP] 브라우저 헬스체크
+//  - findReservationTab를 짧게 시도, 실패/타임아웃이면 false
+// ─────────────────────────────────────────────────────────
+async function isBrowserAliveQuick(timeoutMs = 2500) {
+    try {
+        const ok = await Promise.race([
+            (async () => { await findReservationTab(); return true; })(),
+            sleep(timeoutMs).then(() => false),
+        ]);
+        return !!ok;
+    } catch {
+        return false;
+    }
 }
 
 function stopApiServer() {

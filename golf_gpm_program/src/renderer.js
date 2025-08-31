@@ -6,14 +6,16 @@ window.onload = async () => {
     const storeId = await window.electronAPI.loadSettings("store/id") || "-";
     const userId = await window.electronAPI.loadSettings("login/id") || "-";
     const pw = await window.electronAPI.loadSettings("login/password") || "-";
+    const autoLoginFlag = await window.electronAPI.loadSettings("login/autoLogin"); // "T" | "F" | undefined
 
-    // ✅ 크롬 경로: 먼저 자동 탐지 → 없으면 저장된 값 사용
+    // ✅ 크롬 경로: 자동 탐지 우선, 성공 시 저장까지
     let chromePath = await window.electronAPI.getChromePath();
-    if (!chromePath) {
+    if (chromePath) {
+        console.log(`🔍 자동 탐지된 크롬 경로 사용: ${chromePath}`);
+        await window.electronAPI.saveSettings("chrome/path", chromePath);
+    } else {
         chromePath = await window.electronAPI.loadSettings("chrome/path") || "-";
         console.log(`📦 저장된 크롬 경로 사용: ${chromePath}`);
-    } else {
-        console.log(`🔍 자동 탐지된 크롬 경로 사용: ${chromePath}`);
     }
 
     // ✅ input에도 값 세팅
@@ -43,34 +45,62 @@ window.onload = async () => {
         `● 아이디 : ${userId}<br>● 비밀번호 : ${'*'.repeat(pw.length)}`;
     document.getElementById("chrome-info").innerHTML =
         `● 경로 : ${chromePath}`;
+
+    // ============================
+    // ✅ 자동 로그인 체크박스 로드/저장/자동실행
+    // ============================
+    const autoLoginEl = document.getElementById("auto-login");
+
+    // 1) 저장값을 체크박스에 반영
+    autoLoginEl.checked = (autoLoginFlag === "T");
+
+    // 2) 변경 시 저장
+    autoLoginEl.addEventListener("change", async (e) => {
+        await window.electronAPI.saveSettings("login/autoLogin", e.target.checked ? "T" : "F");
+        console.log("🔄 autoLogin 저장:", e.target.checked ? "T" : "F");
+    });
+
+    // 3) 자동 로그인 켜져 있으면, 필수값이 모두 채워졌을 때 자동 실행
+    const hasAll =
+        (userId && userId !== "-") &&
+        (pw && pw !== "-") &&
+        (storeId && storeId !== "-") &&
+        (chromePath && chromePath !== "-");
+
+    if (autoLoginEl.checked && hasAll) {
+        console.log("✅ 자동 로그인 활성화 → 자동 시작 예약");
+        setTimeout(() => {
+            const startBtn = document.querySelector('button[onclick="startAction()"]');
+            if (startBtn) {
+                startBtn.classList.add("pressed");
+                setTimeout(() => startBtn.classList.remove("pressed"), 150);
+            }
+            startAction();
+        }, 400);
+    }
 };
 
-
-window.electronAPI.onCrawlError((message) => {
+// 에러 알림 + 버튼 원복
+const unsubscribeCrawlError = window.electronAPI.onCrawlError((message) => {
     alert(`🚨 작업중 중 오류 발생:\n${message}`);
+    enableAllButtons();
 });
 
-
-// 모달 열기
+// 모달 열기/닫기
 function showModal(id) {
     const modal = document.getElementById(id);
     if (!modal) return;
-
-    modal.classList.add('show');  // 모달 표시
-    document.body.style.overflow = 'hidden';  // 배경 스크롤 방지
-
+    modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
     if (id === 'store-modal') initStoreModal();
     if (id === 'login-modal') initLoginModal();
     if (id === 'chrome-modal') initChromeModal();
-
 }
-
-// 모달 닫기
 function closeModal(id) {
     const modal = document.getElementById(id);
     if (modal) {
-        modal.classList.remove('show');  // 모달 숨김
-        document.body.style.overflow = '';  // 스크롤 다시 허용
+        modal.classList.remove('show');
+        document.body.style.overflow = '';
     }
 }
 
@@ -79,8 +109,8 @@ function initStoreModal() {
     console.log("🔄 매장 모달 초기화 시작");
     window.electronAPI.loadSettings('store/id').then(val => {
         console.log(`📥 저장된 store/id 값: ${val}`);
-        document.getElementById('store-id').value = val || '';  // 저장된 값 세팅
-        document.getElementById('store-id-error').innerText = '';  // 에러 초기화
+        document.getElementById('store-id').value = val || '';
+        document.getElementById('store-id-error').innerText = '';
     });
 }
 
@@ -112,27 +142,14 @@ async function saveLoginInfo() {
     pwError.innerText = "";
 
     let hasError = false;
-
-    if (!id) {
-        idError.innerText = "필수값 입니다.";
-        hasError = true;
-    }
-
-    if (!pw) {
-        pwError.innerText = "필수값 입니다.";
-        hasError = true;
-    }
-
-    if (hasError) {
-        console.log("❌ 로그인 입력 오류 있음");
-        return;
-    }
+    if (!id) { idError.innerText = "필수값 입니다."; hasError = true; }
+    if (!pw) { pwError.innerText = "필수값 입니다."; hasError = true; }
+    if (hasError) { console.log("❌ 로그인 입력 오류 있음"); return; }
 
     await window.electronAPI.saveSettings('login/id', id);
     await window.electronAPI.saveSettings('login/password', pw);
 
     console.log(`✅ 로그인 정보 저장 완료: id=${id}, pw=${'*'.repeat(pw.length)}`);
-
     document.getElementById("login-info").innerHTML =
         `● 아이디 : ${id}<br>● 비밀번호 : ${'*'.repeat(pw.length)}`;
     closeModal('login-modal');
@@ -145,12 +162,7 @@ async function saveStoreInfo() {
     const errorBox = document.getElementById("store-id-error");
 
     errorBox.innerText = "";
-
-    if (!storeId) {
-        errorBox.innerText = "필수값 입니다.";
-        console.log("❌ 매장 ID가 비어 있음");
-        return;
-    }
+    if (!storeId) { errorBox.innerText = "필수값 입니다."; console.log("❌ 매장 ID가 비어 있음"); return; }
 
     await window.electronAPI.saveSettings('store/id', storeId);
     console.log(`✅ 매장 정보 저장 완료: storeId=${storeId}`);
@@ -160,7 +172,23 @@ async function saveStoreInfo() {
     closeModal('store-modal');
 }
 
-// 시작 버튼 클릭 시 실행 (향후 puppeteer 실행 IPC 요청 연결 가능)
+// 버튼 잠금/해제 유틸
+function disableAllButtons() {
+    document.querySelectorAll('button').forEach(btn => {
+        btn.disabled = true;
+        btn.style.backgroundColor = '#aaa';
+        btn.style.cursor = 'not-allowed';
+    });
+}
+function enableAllButtons() {
+    document.querySelectorAll('button').forEach(btn => {
+        btn.disabled = false;
+        btn.style.backgroundColor = '';
+        btn.style.cursor = '';
+    });
+}
+
+// 시작 버튼 클릭 시 실행
 async function startAction() {
     console.log("▶ 시작 버튼 클릭됨");
 
@@ -171,27 +199,21 @@ async function startAction() {
 
     if (!userId || !password || !storeId || !chromePath) {
         alert("아이디, 비밀번호, 매장 ID를 모두 입력하세요.");
-        console.log('userId :', userId)
-        console.log('password :', password)
-        console.log('storeId :', storeId)
-        console.log('chromePath :', chromePath)
-
+        console.log('userId :', userId);
+        console.log('password :', password);
+        console.log('storeId :', storeId);
+        console.log('chromePath :', chromePath);
         return;
     }
 
-    // ✅ 시작 버튼 + 모든 등록 버튼 비활성화
-    const allButtons = document.querySelectorAll('button');
-    allButtons.forEach(btn => {
-        btn.disabled = true;
-        btn.style.backgroundColor = '#aaa';
-        btn.style.cursor = 'not-allowed';
-    });
+    disableAllButtons();
     console.log("🔒 모든 버튼 비활성화 완료");
 
-    // ✅ 매장 정보 & 토큰 요청
+    // 매장 정보 & 토큰 요청
     const result = await window.electronAPI.fetchStoreInfo(storeId);
     if (!result || !result.store) {
         alert("매장 정보를 가져오지 못했습니다.");
+        enableAllButtons(); // ← 실패 시 버튼 복구
         return;
     }
 
@@ -199,13 +221,10 @@ async function startAction() {
     const name = store?.name || '-';
     const branch = store?.branch || '-';
 
-    // ✅ index.html에 뿌리기
     document.getElementById("store-info").innerHTML =
         `● 매장명 : ${name}<br>● 지점 : ${branch}`;
-
     console.log("🟢 매장 정보 불러오기 완료:", name, branch);
 
-    // ✅ puppeteer 실행
     window.electronAPI.startCrawl({ userId, password, storeId, chromePath });
 }
 
@@ -213,19 +232,16 @@ async function startAction() {
 function initChromeModal() {
     console.log("🔄 크롬 경로 모달 초기화 시작");
 
-    // 1. 실제 설치된 크롬 경로 우선 확인
-    window.electronAPI.getChromePath().then(autoPath => {
+    window.electronAPI.getChromePath().then(async (autoPath) => {
         if (autoPath) {
             console.log(`✅ 자동 탐지된 크롬 경로 사용: ${autoPath}`);
             document.getElementById('chrome-path').value = autoPath;
+            await window.electronAPI.saveSettings('chrome/path', autoPath);
         } else {
-            // 2. 자동 경로 실패 시, 저장된 값 사용
-            window.electronAPI.loadSettings('chrome/path').then(savedPath => {
-                console.log(`📦 저장된 경로 사용: ${savedPath}`);
-                document.getElementById('chrome-path').value = savedPath || '';
-            });
+            const savedPath = await window.electronAPI.loadSettings('chrome/path');
+            console.log(`📦 저장된 경로 사용: ${savedPath}`);
+            document.getElementById('chrome-path').value = savedPath || '';
         }
-
         document.getElementById('chrome-path-error').innerText = '';
     });
 }
@@ -236,11 +252,7 @@ async function saveChromePath() {
     const errorBox = document.getElementById("chrome-path-error");
 
     errorBox.innerText = "";
-
-    if (!chromePath) {
-        errorBox.innerText = "필수값 입니다.";
-        return;
-    }
+    if (!chromePath) { errorBox.innerText = "필수값 입니다."; return; }
 
     await window.electronAPI.saveSettings('chrome/path', chromePath);
     document.getElementById("chrome-info").innerHTML = `● 경로 : ${chromePath}`;
@@ -252,11 +264,21 @@ async function browseChromePath() {
     const selected = await window.electronAPI.openChromePathDialog();
     if (selected) {
         document.getElementById("chrome-path").value = selected;
+        await window.electronAPI.saveSettings('chrome/path', selected); // ← 선택 즉시 저장
     }
 }
 
-window.electronAPI.onAuthExpired(() => {
-    console.log('🚨 인증 만료 감지됨 → 시작 버튼 자동 클릭');
-    startAction();
-});
+// ✅ 인증 만료 → 앱 재시작 요청(클라이언트 측 소프트 쿨다운)
+let lastRelaunchAskAt = 0;
+const RELAUNCH_ASK_COOLDOWN_MS = 10_000; // 10초
 
+const unsubscribeAuthExpired = window.electronAPI.onAuthExpired(() => {
+    const now = Date.now();
+    if (now - lastRelaunchAskAt < RELAUNCH_ASK_COOLDOWN_MS) {
+        console.log('⏳ auth-expired: 클라이언트 쿨다운 중 → 재요청 생략');
+        return;
+    }
+    lastRelaunchAskAt = now;
+    console.log('🚨 인증 만료 감지됨 → 앱 재시작 요청');
+    window.electronAPI.requestRelaunch('auth-expired');
+});
