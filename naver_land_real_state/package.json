@@ -1,0 +1,42 @@
+{
+  "name": "NAVER_LAND_REAL_STATE",
+  "version": "0.20.0-min",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "build": {
+    "appId": "com.pandop.hooking",
+    "productName": "PandoP",
+    "artifactName": "${productName}-${version}-Setup.${ext}",
+    "asar": true,
+    "files": [
+      "index.html",
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "NAVER_LAND_REAL_STATE"
+    }
+  },
+  "devDependencies": {
+    "electron": "^28.1.0",
+    "electron-builder": "^24.6.0"
+  },
+  "dependencies": {
+    "puppeteer": "^24.9.0"
+  }
+}
