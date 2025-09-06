@@ -10,10 +10,17 @@ try { app = require('electron').app; } catch { app = null; }
 // [ADD] 앱 재시작 공용 유틸(중복/쿨다운 가드 포함)
 const { requestRelaunch } = require('../utils/relaunch');
 
+// [ADD] 얕은 헬스체크/탭확인/복원상태 함수 import
+const { isPuppeteerAlive, hasReservationTab, isRestoreInProgress } = require('../services/puppeteer'); // [ADD]
+
 let serverInstance = null;
 
 // 공통 sleep
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+// [CHG] 서버 리슨 시작 시각 기반 그레이스
+let SERVER_START_TS = 0;                  // [ADD]
+const STARTUP_GRACE_MS = 60_000;          // [ADD]
 
 // ─────────────────────────────────────────────────────────
 // 로그 파일 경로
@@ -48,7 +55,7 @@ function getReservationLogPath() {
 }
 
 // ─────────────────────────────────────────────────────────
-// 시간/ID 유틸
+// 시간/ID 유틸 YYYY.MM.DD HH:MM:SS.sss
 // ─────────────────────────────────────────────────────────
 function getNow() {
     const now = new Date();
@@ -119,7 +126,6 @@ function parseBookingDate(bookingDate) {
 
 // ─────────────────────────────────────────────────────────
 // (중요) 첫 요청 안정화: 예약 탭 준비/달력 열기
-//    - 이 함수는 "열기만" 하고 닫지 않음 (작업은 열린 상태에서 진행)
 // ─────────────────────────────────────────────────────────
 async function ensureBookingReady(page) {
     await page.bringToFront();
@@ -146,10 +152,7 @@ async function ensureBookingReady(page) {
 }
 
 // ─────────────────────────────────────────────────────────
-// (선택) 직렬 큐 + inFlight 가드로 중복 실행 방지
-//  - q: 작업 대기열 (FIFO)
-//  - inFlight: "이미 큐에 들어왔거나 실행 중"인 작업 id 모음(Set)
-//    → 동일 id가 다시 들어오면 enqueue 시점에 스킵(drop-new 정책)
+// 직렬 큐 + inFlight 가드
 // ─────────────────────────────────────────────────────────
 const q = [];
 let qRunning = false;
@@ -185,7 +188,6 @@ async function drain() {
 
 // ─────────────────────────────────────────────────────────
 // 예약 처리 (단건)
-//  - 항상 리로드 → 4초 대기 → ensureBookingReady(열림 보장) → 월/일 클릭
 // ─────────────────────────────────────────────────────────
 async function handleReservationRetry(logEntry) {
     try {
@@ -271,7 +273,7 @@ async function handleReservationRetry(logEntry) {
 }
 
 // ─────────────────────────────────────────────────────────
-// 실패 로그 재시도 스케줄러
+// 실패/지연 예약 재시도 스케줄러
 // ─────────────────────────────────────────────────────────
 function retryFailedReservations() {
     const logPath = getReservationLogPath();
@@ -285,17 +287,34 @@ function retryFailedReservations() {
         return;
     }
 
-    const failEntries = data.filter(entry => entry.result === 'fail');
+    // [REPLACE] fail + (기한 경과) pending 모두 재시도
+    const now = Date.now();
+    const PENDING_GRACE_MS = 5_000; // [ADD] 예정시각 경과 허용 여유
+    const inferDelayMs = (t) => (t === 'm' ? 60_000 : 60_000); // [ADD] 현행 규칙과 동일(둘 다 1분)
+    const scheduledTsOf = (e) => {
+        if (Number.isFinite(e?.scheduledTs)) return e.scheduledTs;
+        if (Number.isFinite(e?.requestTs)) return e.requestTs + inferDelayMs(e?.type);
+        return NaN;
+    };
 
-    if (failEntries.length === 0) {
-        nodeLog('✅ 실패 로그 없음 → 재시도 생략');
+    const retryables = data.filter((e) => {
+        if (e.result === 'fail') return true; // 실패는 무조건 재시도
+        if (e.result === 'pending') {
+            const sched = scheduledTsOf(e);
+            return Number.isFinite(sched) && now >= (sched + PENDING_GRACE_MS);
+        }
+        return false;
+    });
+
+    if (retryables.length === 0) {
+        nodeLog('✅ 재처리 대상 없음 → 재시도 생략');
         return;
     }
 
-    nodeLog(`🔁 실패한 예약 ${failEntries.length}건 재시도 시작`);
+    nodeLog(`🔁 재처리 대상 ${retryables.length}건 재시도 시작 (fail 또는 기한 경과 pending)`);
 
-    failEntries.forEach((entry, idx) => {
-        entry.retryCnt++;
+    retryables.forEach((entry) => {
+        entry.retryCnt = (entry.retryCnt ?? 0) + 1;
         nodeLog(`⏳ 재시도 예약 준비 (id=${entry.id}, bookingDate=${entry.bookingDate}, retryCnt=${entry.retryCnt}, result=${entry.result})`);
         enqueue(entry.id, async () => {
             await handleReservationRetry(entry);
@@ -324,6 +343,7 @@ async function startApiServer(port = 32123) {
             channel: type === 'm' ? '모바일' : '전화',
             requestDate: getNow(),
             requestTs: Date.now(),
+            scheduledTs: Date.now() + delayMs,              // [ADD] 실제 실행 예정 시각
             endDate: '',
             result: 'pending',
             error: null,
@@ -332,28 +352,61 @@ async function startApiServer(port = 32123) {
 
         nodeLog(`📥 예약 요청 수신 (id=${logEntry.id}, bookingDate=${bookingDate}, type=${type}) → ${delayMs / 60000}분 후 실행 예정`);
         res.sendStatus(200);
-
+        
+        //요청 데이터 json에 넣기
         writeLog(logEntry);
 
         // ─────────────────────────────────────────────────────
-        // [MODIFY] 브라우저 헬스체크 → 죽어있으면 "공용 재시작" 요청
-        //  - __health__/__restart__ 고정 id → inFlight로 중복 방지
-        //  - requestRelaunch() 자체가 내부 쿨다운/중복 가드 포함
+        // [REPLACE] 헬스체크 완화: 브라우저 세션만 확인 + 시작 그레이스
+        //     + watcher 복원 진행/지연 재확인 로직
         // ─────────────────────────────────────────────────────
         enqueue('__health__', async () => {
+            const withinGrace = SERVER_START_TS && (Date.now() - SERVER_START_TS) < STARTUP_GRACE_MS; // [CHG]
+
             const alive = await isBrowserAliveQuick(2500);
             if (!alive) {
+                
+                //복원 큐에 있늕 확인 있따면 보류
+                if (isRestoreInProgress()) {
+                    nodeLog('🔧 watcher 복원 진행 중 → 재시작 보류');
+                    return;
+                }
+
+                // 지연 재확인
+                await sleep(1500);
+
+                //한번더 브라우저 확인
+                if (await isBrowserAliveQuick(1000)) {             // [ADD]
+                    nodeLog('✅ 지연 재확인: 브라우저 alive → 재시작 취소');
+                    return;
+                }
+
+                //첫 요청이 6분 이내인지 (아직 첫요청 전이라 우선 보류)
+                if (withinGrace) {
+                    nodeLog('⏳ STARTUP GRACE: 브라우저 미활성인데 재시작 보류(초기화 중일 수 있음)');
+                    return;
+                }
                 nodeError('🧨 브라우저 꺼짐 감지 → 앱 재시작 요청');
                 enqueue('__restart__', async () =>
-                   requestRelaunch({ reason: 'browser not alive on API request' })
+                    requestRelaunch({ reason: 'browser not alive on API request' })
                 );
+                return;
+            }
+
+            // 브라우저는 살아있지만 예약탭이 없으면 경고만 (재시작 X)
+            try {
+                const hasTab = await hasReservationTab().catch(() => false);
+                if (!hasTab) {
+                    nodeLog('⚠️ 예약 탭 미발견 (브라우저는 alive). 초기 로그인/탭 오픈 대기 상태일 수 있음.');
+                }
+            } catch (e) {
+                nodeError('❌ 예약 탭 상태 확인 오류:', e.message);
             }
         });
 
-        // 직렬 큐에 예약: "요청시각 기준" 예약 실행
+        // 직렬 큐에 예약: "예약 예정시각" 기준 실행
         enqueue(logEntry.id, async () => {
-            const scheduledMs = logEntry.requestTs + delayMs;
-            const remaining = scheduledMs - Date.now();
+            const remaining = (logEntry.scheduledTs ?? (logEntry.requestTs + delayMs)) - Date.now(); // [CHG]
             if (remaining > 0) await sleep(remaining);
             await handleReservationRetry(logEntry);
         });
@@ -361,13 +414,14 @@ async function startApiServer(port = 32123) {
 
     serverInstance = http.createServer(expressApp);
     serverInstance.listen(port, () => {
+        SERVER_START_TS = Date.now(); // [ADD] 실제 리슨 시작 시각 기록
         nodeLog(`🌐 API 서버 실행 중: http://localhost:${port}/reseration`);
     });
 
     // (옵션) 이전 비정상 종료로 남아있을 수도 있는 .tmp를 정리
     try { fs.unlinkSync(getReservationLogPath() + '.tmp'); } catch (_) {}
 
-    // 10분마다 실패 재시도
+    // 10분마다 실패/지연 예약 재시도
     setInterval(retryFailedReservations, 1000 * 60 * 10);
 
     // [ADD] 매일 7일 경과 로그 자동 정리 (자정+5분, 즉시 1회 포함)
@@ -375,7 +429,25 @@ async function startApiServer(port = 32123) {
 }
 
 // ─────────────────────────────────────────────────────────
-// [ADD] 7일 초과 로그 정리 유틸
+// [REPLACE] 얕은 헬스체크로 교체 (세션만 확인)
+// 2.5초 안에 isPuppeteerAlive() 결과가 나오면 그 값을 반환하고,
+// 만약 2.5초가 지나도 응답이 없으면 false를 반환합니다.
+// ─────────────────────────────────────────────────────────
+async function isBrowserAliveQuick(timeoutMs = 2500) {
+    try {
+        const ok = await Promise.race([
+            (async () => isPuppeteerAlive())(),
+            sleep(timeoutMs).then(() => false),
+        ]);
+        nodeLog(`🩺 isBrowserAliveQuick=${ok} (timeout=${timeoutMs}ms)`); // [ADD] 관찰 로그
+        return ok;
+    } catch {
+        return false;
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// 7일 초과 로그 정리 유틸
 // ─────────────────────────────────────────────────────────
 const PURGE_DAYS = 7;
 let purgeTimeoutId = null;
@@ -453,21 +525,8 @@ function scheduleDailyPurge(days = PURGE_DAYS) {
 }
 
 // ─────────────────────────────────────────────────────────
-// [KEEP] 브라우저 헬스체크
-//  - findReservationTab를 짧게 시도, 실패/타임아웃이면 false
+// 서버 종료
 // ─────────────────────────────────────────────────────────
-async function isBrowserAliveQuick(timeoutMs = 2500) {
-    try {
-        const ok = await Promise.race([
-            (async () => { await findReservationTab(); return true; })(),
-            sleep(timeoutMs).then(() => false),
-        ]);
-        return !!ok;
-    } catch {
-        return false;
-    }
-}
-
 function stopApiServer() {
     return new Promise((resolve) => {
         if (serverInstance) {

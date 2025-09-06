@@ -238,7 +238,7 @@ async function initBrowser(chromePath) {
 
         nodeLog('🚀 새 브라우저 인스턴스 실행됨');
 
-        // [MOD] 브라우저 종료 이벤트 → 공용 재시작 유틸 호출
+        // [CHG] 브라우저 종료시 공용 재시작 유틸 호출(기존 로직 유지)
         browser.on('disconnected', () => {
             nodeLog('🛑 브라우저 종료 감지: 내부 객체 초기화');
             browser = null;
@@ -289,8 +289,8 @@ async function login({ userId, password, token, chromePath }) {
         }
 
         nodeLog('🌐 로그인 페이지 접속 시도');
-        await page.goto('https://gpm.golfzonpark.com', { waitUntil: 'networkidle2', timeout: 60_000 });
-
+        await page.goto('https://m.land.naver.com/map/37.563517:126.9084:12:1144000000/APT:OPST:VL:ABYG:OBYG:JGC:JWJT:DDDGG:SGJT:HOJT:JGB:OR:SG:SMS:GJCG:GM:TJ:APTHGJ/A1:B1:B2:B3#mapFullList', { waitUntil: 'networkidle2', timeout: 60_000 });
+        return;
         await page.waitForSelector('#user_id', { timeout: 10_000 });
         await page.type('#user_id', userId, { delay: 50 });
 
@@ -579,9 +579,33 @@ async function shutdownBrowser() {
 
 // ───────────────────────────────────────────────────────────────
 // [ADD] 재시작 억제창 (의도적 종료 직후 재시작 루프 방지)
-//   - 값이 0이 아니고, 현재시각 < suppressRelaunchUntil 이면
-//     브라우저 disconnected 이벤트에서 재시작 요청을 생략
 // ───────────────────────────────────────────────────────────────
 let suppressRelaunchUntil = 0;
 
-module.exports = { login, findReservationTab, shutdownBrowser };
+// ───────────────────────────────────────────────────────────────
+// [ADD] 얕은 헬스체크 & 예약탭 존재 여부 체크
+// 내가 띄운 Puppeteer 브라우저 세션 자체가 살아있는가?”**만 확인합니다.
+// ───────────────────────────────────────────────────────────────
+function isPuppeteerAlive() { // [ADD]
+    return !!(browser && browser.isConnected && browser.isConnected());
+}
+
+async function hasReservationTab() { // [ADD]
+    if (!browser || !browser.isConnected()) return false;
+    const pages = await browser.pages();
+    return pages.some(p => !p.isClosed() && p.url().includes('/ui/booking'));
+}
+
+// [ADD] 복원 진행 여부 노출 (apiServer가 재시작 판단 방어용)
+function isRestoreInProgress() { // [ADD]
+    return restoreQueue.length > 0;
+}
+
+module.exports = {
+    login,
+    findReservationTab,
+    shutdownBrowser,
+    isPuppeteerAlive,     // [ADD]
+    hasReservationTab,    // [ADD]
+    isRestoreInProgress   // [ADD]
+};
