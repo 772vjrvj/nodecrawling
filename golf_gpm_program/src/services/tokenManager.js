@@ -1,33 +1,27 @@
 //src/services/tokenManager.js
 const { fetchTokenFromApi } = require('../utils/api');
 
-const TEST_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY2OTBkN2VhNzUwZmY5YTY2ODllOWFmMyIsInJvbGUiOiJzaW5nbGVDcmF3bGVyIiwiZXhwIjo0ODk4ODQ0MDc3fQ.aEUYvIzMhqW6O2h6hQTG8IfzJNhpvll4fOdN7udz1yc"
 let cachedToken = null;
 let refreshInterval = null;
 let storeId = null;
 
-/**
- * 토큰 갱신
- */
+
+//region ==================== 토큰 갱신 ====================
+// 확인 완료 2025-09-13 ksh
 async function refreshToken(currentStoreId) {
     if (!currentStoreId) return;
     try {
-        const token = await fetchTokenFromApi(currentStoreId);
-        if (!token) throw new Error("null token");
-        cachedToken = token;
+        cachedToken = await fetchTokenFromApi(currentStoreId);
         nodeLog("✅ 토큰 갱신 완료");
     } catch (e) {
         nodeLog("❌ 토큰 갱신 실패, fallback 사용");
-        if (process.env.NODE_ENV === 'production') {
-            throw new Error("❌ 프로덕션에서 fallback 토큰 사용 불가");
-        }
-        cachedToken = TEST_TOKEN;
     }
 }
+//endregion
 
-/**
- * 갱신 루프 시작
- */
+
+//region ==================== 토큰 갱신 루프 ====================
+// 확인 완료 2025-09-13 ksh
 async function start(storeIdParam) {
     if (storeId === storeIdParam && refreshInterval && cachedToken) return;
 
@@ -38,10 +32,11 @@ async function start(storeIdParam) {
 
     refreshInterval = setInterval(() => refreshToken(storeId), 60 * 60 * 1000);
 }
+//endregion
 
-/**
- * 갱신 중단
- */
+
+//region ==================== 토큰 갱신 루프 ====================
+// 확인 완료 2025-09-13 ksh
 function stop() {
     if (refreshInterval) {
         clearInterval(refreshInterval);
@@ -49,18 +44,19 @@ function stop() {
         nodeLog("🛑 자동 갱신 종료됨");
     }
 }
+//endregion
 
+
+//region ==================== 매장 아이디 ====================
+// 확인 완료 2025-09-13 ksh
 function getStoreId() {
     return storeId;
 }
+//endregion
 
-function getToken() {
-    return cachedToken;
-}
 
-/**
- * 토큰이 생길 때까지 기다림 (최대 5초)
- */
+//region ==================== 토큰 응답 (혹시 요청중이면 대기후 응답) ====================
+// 확인 완료 2025-09-13 ksh
 async function getTokenAsync(retries = 10, interval = 500) {
     for (let i = 0; i < retries; i++) {
         if (cachedToken) return cachedToken;
@@ -71,13 +67,13 @@ async function getTokenAsync(retries = 10, interval = 500) {
     if (process.env.NODE_ENV === 'production') {
         throw new Error("⚠️ 프로덕션에서 fallback 금지");
     }
-    return TEST_TOKEN;
 }
+//endregion
+
 
 module.exports = {
     start,
     stop,
-    getToken,
     getTokenAsync,
     getStoreId,
 };

@@ -261,3 +261,11 @@ https://gpmui.golfzonpark.com/rest/ui/reservation/14150?timestamp=1753371458653&
 >> watcher.py파일을 exe파일로 빌드하여 구동하는 형태로 변경
 
 (4) 브라우저 활성화후 , 간헐적으로(?:총4회중성공,실패,성공,실패) 예약일자로 캘린더가 이동하지 않는 현상 점검 필요
+
+
+
+
+
+2025-09-13 토
+https://docs.google.com/spreadsheets/d/1ll0t1y2RmXiCY_pfXszL6gv8D8KQFQSRrcWISwkjB9c/edit?gid=1349147893#gid=1349147893
+ㄴ현재까지 TC 1,3,6,8 확인해 주시면 되겠습니다.

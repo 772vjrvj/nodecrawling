@@ -80,12 +80,6 @@ window.onload = async () => {
     }
 };
 
-// 에러 알림 + 버튼 원복
-const unsubscribeCrawlError = window.electronAPI.onCrawlError((message) => {
-    alert(`🚨 작업중 중 오류 발생:\n${message}`);
-    enableAllButtons();
-});
-
 // 모달 열기/닫기
 function showModal(id) {
     const modal = document.getElementById(id);
@@ -268,17 +262,32 @@ async function browseChromePath() {
     }
 }
 
-// ✅ 인증 만료 → 앱 재시작 요청(클라이언트 측 소프트 쿨다운)
-let lastRelaunchAskAt = 0;
-const RELAUNCH_ASK_COOLDOWN_MS = 10_000; // 10초
 
-const unsubscribeAuthExpired = window.electronAPI.onAuthExpired(() => {
-    const now = Date.now();
-    if (now - lastRelaunchAskAt < RELAUNCH_ASK_COOLDOWN_MS) {
-        console.log('⏳ auth-expired: 클라이언트 쿨다운 중 → 재요청 생략');
-        return;
+let unsubscribeAuthExpired = null;
+
+function showAuthExpiredNotice(payload) {
+    const ttl = payload && payload.ttlMs ? Math.floor(payload.ttlMs / 1000) : null;
+    const reason = (payload && payload.reason) || '인증이 만료되었습니다.';
+    // TODO: 여기에 토스트/모달/배너 표시
+    console.log('⚠️', reason, ttl ? `(재시작 억제 ${ttl}s)` : '');
+
+    // 버튼을 보여주되, 메인이 이미 requestRelaunch를 호출하므로 누적 요청을 막고 싶다면 비활성화하거나
+    // 눌렀을 때만 수동 재시작을 허용:
+    // document.querySelector('#restartBtn').onclick = () => window.electronAPI.requestRelaunch('renderer manual restart');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.electronAPI && typeof window.electronAPI.onAuthExpired === 'function') {
+        unsubscribeAuthExpired = window.electronAPI.onAuthExpired((payload) => {
+            try { showAuthExpiredNotice(payload || {}); }
+            catch (e) { console.error('auth-expired UI error:', (e && e.message) || String(e)); }
+        });
     }
-    lastRelaunchAskAt = now;
-    console.log('🚨 인증 만료 감지됨 → 앱 재시작 요청');
-    window.electronAPI.requestRelaunch('auth-expired');
+});
+
+window.addEventListener('beforeunload', () => {
+    if (typeof unsubscribeAuthExpired === 'function') {
+        try { unsubscribeAuthExpired(); } catch (e) { /* noop */ }
+        unsubscribeAuthExpired = null;
+    }
 });

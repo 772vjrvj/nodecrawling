@@ -7,10 +7,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.send('start-crawl', data);
     },
 
+
     saveSettings: (key, value) => {
         console.log(`💾 saveSettings 호출됨 → key: ${key}, value: ${value}`);
         ipcRenderer.send('save-settings', { key, value });
     },
+
 
     loadSettings: async (key) => {
         console.log(`📥 loadSettings 호출됨 → key: ${key}`);
@@ -19,9 +21,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return result;
     },
 
+
     fetchStoreInfo: async (storeId) => {
         return await ipcRenderer.invoke('fetch-store-info', storeId);
     },
+
 
     getChromePath: async () => {
         const result = await ipcRenderer.invoke('get-chrome-path');
@@ -29,26 +33,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
         return result;
     },
 
+
     openChromePathDialog: () => ipcRenderer.invoke('open-chrome-path-dialog'),
 
-    // ✅ 구독 → 언구독 함수 반환(메모리릭/중복 핸들러 방지)
-    onCrawlError: (callback) => {
-        const handler = (_, message) => callback(message);
-        ipcRenderer.on('crawl-error', handler);
-        return () => ipcRenderer.removeListener('crawl-error', handler);
-    },
-
-    onAuthExpired: (callback) => {
-        const handler = () => callback();
-        ipcRenderer.on('auth-expired', handler);
-        return () => ipcRenderer.removeListener('auth-expired', handler);
-    },
 
     requestRelaunch: (reason) => ipcRenderer.invoke('request-relaunch', reason),
 
-    quitApp: () => ipcRenderer.invoke('quit-app'),
 
-    hideToTray: () => ipcRenderer.send('ui:hide-to-tray'),
+    // === 신규 === 인증 만료 이벤트 구독/해제/1회 구독
+    onAuthExpired: (handler) => {
+        if (typeof handler !== 'function') return () => {};
+        const listener = (event, payload) => {
+            try { handler(payload); }
+            catch (e) { console.error('onAuthExpired handler error:', (e && e.message) || String(e)); }
+        };
+        ipcRenderer.on('auth-expired', listener);
+        // 호출 측에서 해제할 수 있도록 unsubscribe 반환
+        return () => {
+            try { ipcRenderer.removeListener('auth-expired', listener); }
+            catch (e) { console.error('removeListener error:', (e && e.message) || String(e)); }
+        };
+    },
+
+    // === 신규 === 필요 시 1회성 구독도 제공
+    onceAuthExpired: (handler) => {
+        if (typeof handler !== 'function') return;
+        ipcRenderer.once('auth-expired', (event, payload) => {
+            try { handler(payload); }
+            catch (e) { console.error('onceAuthExpired handler error:', (e && e.message) || String(e)); }
+        });
+    },
+
+
     quit: () => ipcRenderer.invoke('app:quit'),
 
 });

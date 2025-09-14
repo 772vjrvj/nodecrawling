@@ -96,9 +96,9 @@ async function del(token, storeId, data, paramType = null) {
     return handleResponse(axios.delete(url, { headers, data }), 'DELETE');
 }
 
-/**
- * ✅ API 서버로부터 토큰 직접 발급 요청 (캐싱 없음)
- */
+
+//region ==================== api 토큰 갱신 ====================
+// 확인 완료 2025-09-13 ksh
 async function fetchTokenFromApi(storeId) {
     const url = `${BASE_URL}/auth/token/stores/${storeId}/role/singleCrawler`;
     nodeLog(`🔑 토큰 요청: ${url}`);
@@ -119,6 +119,8 @@ async function fetchTokenFromApi(storeId) {
     nodeLog("⚠️ fallback 토큰 반환");
     return null;
 }
+//endregion
+
 
 /**
  * ✅ 매장 정보 조회

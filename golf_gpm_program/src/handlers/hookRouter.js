@@ -16,7 +16,7 @@ async function matchAndDispatch(action, url, responseData) {
     const entry = requestStore[url];
     nodeLog(`📅 저장됨: [${action}]:entry - ${entry}`);
 
-    const token = tokenManager.getToken();
+    const token = tokenManager.getTokenAsync();
     const storeId = tokenManager.getStoreId();
 
     // 🔧 delete_mobile은 요청 매칭 없이도 처리
@@ -206,7 +206,8 @@ async function dispatchAction(action, combinedData, token, storeId) {
 
                 const payload = { reservations };
 
-                nodeLog("📦 detail 예약 전체 payload:", JSON.stringify(payload, null, 2));
+                //nodeLog("📦 detail 예약 전체 payload:", JSON.stringify(payload, null, 2));
+                nodeLog("📦 detail 예약 전체 payload:", payload);
                 nodeLog("📦 detail 예약 date:", date);
 
                 // ✅ 예약이 하나도 없으면 skip

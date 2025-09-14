@@ -93,6 +93,16 @@ C:\Users\사용자\AppData\Local\Programs\golf-gpm-program\resources\logs
 C:\Users\772vj\AppData\Roaming\PandoP\logs
 C:\Users\<사용자>\AppData\Roaming\PandoP\logs
 
+
+
+apiServer 로그
+C:\Users\772vj\AppData\Roaming\PandoP\logs\reservation-log.json
+C:\Users\<사용자>\AppData\Roaming\<앱이름>\logs\reservation-log.json
+
+
+
+
+
 start-with-log.bat 바탕화면에 두기
 
 설치 후 

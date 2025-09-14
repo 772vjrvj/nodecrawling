@@ -58,10 +58,19 @@ function compact(obj, alwaysInclude = []) {
 }
 
 
+// ─────────────────────────────────────────────────────────
+// 시간/ID 유틸 YYYY.MM.DD HH:MM:SS.sss
+// ─────────────────────────────────────────────────────────
+function getNow() {
+    const now = new Date();
+    const pad = (n, w = 2) => n.toString().padStart(w, '0');
+    return `${now.getFullYear()}.${pad(now.getMonth() + 1)}.${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${pad(now.getMilliseconds(), 3)}`;
+}
 
 module.exports = {
     toIsoKstFormat,
     compact,
     convertToUtcZFormat,
-    extractDateYYMMDD
+    extractDateYYMMDD,
+    getNow
 };
