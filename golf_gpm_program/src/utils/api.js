@@ -108,6 +108,7 @@ async function fetchTokenFromApi(storeId) {
         if (res.status === 200) {
             const token = res.data?.token || res.data;
             nodeLog("✅ 토큰 발급 성공");
+            nodeLog("✅ 토큰 token : ", token);
             return token;
         } else {
             nodeLog("⚠️ 토큰 발급 응답 오류:", res.status);

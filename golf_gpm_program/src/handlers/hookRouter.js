@@ -16,7 +16,7 @@ async function matchAndDispatch(action, url, responseData) {
     const entry = requestStore[url];
     nodeLog(`📅 저장됨: [${action}]:entry - ${entry}`);
 
-    const token = tokenManager.getTokenAsync();
+    const token = await tokenManager.getTokenAsync();
     const storeId = tokenManager.getStoreId();
 
     // 🔧 delete_mobile은 요청 매칭 없이도 처리

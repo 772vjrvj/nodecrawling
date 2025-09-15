@@ -1,6 +1,6 @@
 {
   "name": "PandoP",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
