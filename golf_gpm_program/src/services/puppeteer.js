@@ -104,7 +104,7 @@ async function calendarSmokeCheck(p) {
 
 //region ==================== 내부 상태 초기화(참조 끊기) ====================
 // 확인 완료 2025-09-13 ksh
-function _resetBrowserState() {
+function resetBrowserState() {
     browser = null;
     page = null;
     mainPage = null;
@@ -183,13 +183,14 @@ async function _safeShutdownExistingBrowser() {
         nodeError('⚠️ 기존 브라우저 종료 중 오류(무시 후 진행):', e?.message || e);
     } finally {
         // 어떤 경우든 내부 참조는 반드시 끊어 새 시작을 준비
-        _resetBrowserState(); // browser/page/mainPage/reservationPage = null
+        resetBrowserState(); // browser/page/mainPage/reservationPage = null
     }
 }
 //endregion
 
 
 //region ==================== 인증 만료 브라우저 종료 (watcherProcess도 함께 정리) ====================
+//gpmui.golfzonpark.com/fc/error
 async function watchForAuthExpiration(mainPageParam) {
     if (authInterval) return; // ✅ 중복 감지 방지
 
@@ -208,8 +209,11 @@ async function watchForAuthExpiration(mainPageParam) {
                 nodeLog('✅ 인증 감시: 브라우저 없음/연결 끊김 → 앱 재시작 요청');
                 clearInterval(authInterval);
                 authInterval = null;
+
                 // 중앙 유틸이 쿨다운/중복 가드 처리
-                requestRelaunch({ reason: 'auth watcher: browser not connected' });
+                resetBrowserState();
+                requestRelaunch({ reason: '브라우저 꺼짐 감지 → 앱 재시작 요청' })
+                suppress(30 * 1000);
                 return;
             }
 
@@ -236,9 +240,6 @@ async function watchForAuthExpiration(mainPageParam) {
                         clearInterval(authInterval);
                         authInterval = null;
 
-                        // === 신규 === 30초간 타 모듈 재시작 요청 억제
-                        suppress(30 * 1000);
-
                         // === 신규 === UX 알림을 먼저 발송 (즉시 토스트 등)
                         const win = BrowserWindow.getAllWindows()[0];
                         if (win && win.webContents) {
@@ -246,10 +247,13 @@ async function watchForAuthExpiration(mainPageParam) {
                             nodeLog('📤 renderer에 auth-expired 전송 완료');
                         }
 
-                        // === 핵심 변경점 ===
+                        resetBrowserState();
                         // 브라우저를 여기서 직접 종료하지 않고 중앙 재시작 정책만 호출
                         // 종료 과정에서 quitApp → shutdownBrowser()가 단 한 번 실행됨
                         requestRelaunch({ reason: 'auth watcher: auth expired' });
+
+                        // === 신규 === 30초간 타 모듈 재시작 요청 억제
+                        suppress(30 * 1000);
 
                         return;
                     }
@@ -324,7 +328,7 @@ async function shutdownBrowser() {
     } finally {
 
         // 3) 내부 참조 정리
-        _resetBrowserState(); // browser/page/mainPage/reservationPage = null
+        resetBrowserState(); // browser/page/mainPage/reservationPage = null
 
         // 4) 주기/워처 정리 (여긴 예외 거의 안 남)
 
@@ -396,7 +400,7 @@ async function initBrowser(chromePath) {
             nodeLog('🛑 브라우저 종료 감지: 내부 객체 초기화');
 
             // 2 내부 참조 모두 끊기 (GC 가능 상태로)
-            _resetBrowserState(); // browser/page/mainPage/reservationPage = null
+            resetBrowserState(); // browser/page/mainPage/reservationPage = null
 
             // 재시작 요청(차단/억제/쿨다운/중복 제어는 utils/relaunch.js에서 일괄 처리)
             try {
@@ -450,7 +454,7 @@ async function initBrowser(chromePath) {
     } catch (err) {
         nodeError('❌ 브라우저 생성 중 에러:', (err && err.message) ? err.message : String(err));
         // 실패 시 상태 초기화 보장
-        _resetBrowserState();
+        resetBrowserState();
         throw err;
     }
 }
@@ -861,7 +865,8 @@ module.exports = {
     login,
     findReservationTab,
     shutdownBrowser,
-    isPuppeteerAlive,     // [ADD]
-    hasReservationTab,    // [ADD]
-    isRestoreInProgress   // [ADD]
+    isPuppeteerAlive,
+    hasReservationTab,
+    isRestoreInProgress,
+    resetBrowserState
 };

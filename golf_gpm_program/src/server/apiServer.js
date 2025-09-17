@@ -6,8 +6,8 @@ const path = require('path');
 const { findReservationTab } = require('../services/puppeteer'); // 안정화 포함됨
 const { app } = require('electron');
 const { getNow } = require('../utils/common');
-const { requestRelaunch } = require('../utils/relaunch');
-const { isPuppeteerAlive, hasReservationTab, isRestoreInProgress } = require('../services/puppeteer'); // [ADD]
+const { requestRelaunch, suppress} = require('../utils/relaunch');
+const { isPuppeteerAlive, hasReservationTab, isRestoreInProgress, resetBrowserState } = require('../services/puppeteer'); // [ADD]
 
 
 let serverInstance = null;             //서버 인스턴스
@@ -129,9 +129,10 @@ async function startApiServer(port = 32123) {
                     return;
                 }
                 nodeError('🧨 브라우저 꺼짐 감지 → 앱 재시작 요청');
-                enqueue('__restart__', async () =>
-                    requestRelaunch({ reason: 'browser not alive on API request' })
-                );
+                resetBrowserState();
+                requestRelaunch({ reason: '브라우저 꺼짐 감지 → 앱 재시작 요청' })
+                suppress(30 * 1000);
+                
                 return;
             }
 
@@ -140,9 +141,16 @@ async function startApiServer(port = 32123) {
                 const hasTab = await hasReservationTab().catch(() => false);
                 if (!hasTab) {
                     nodeLog('⚠️ 예약 탭 미발견 (브라우저는 alive). 초기 로그인/탭 오픈 대기 상태일 수 있음.');
+                    resetBrowserState();
+                    requestRelaunch({ reason: '예약 탭 미발견 재시작' })
+                    suppress(30 * 1000);
                 }
             } catch (e) {
                 nodeError('❌ 예약 탭 상태 확인 오류:', e.message);
+                resetBrowserState();
+                requestRelaunch({ reason: '예약 탭 상태 확인 오류 재시작' })
+                suppress(30 * 1000);
+
             }
         });
 
